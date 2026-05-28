@@ -1,0 +1,13 @@
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+.venv*/
+config/config.yaml
+data/*.db
+data/*.db-*
+logs/*.log
+logs/*.log.*
+logs/*.pid
+.pytest_cache/

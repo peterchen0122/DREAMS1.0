@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dreams-outstation"
+version = "0.1.0"
+description = "DREAMS DNP3 outstation bridge for PV gateway MQTT data"
+requires-python = ">=3.10"
+dependencies = [
+    "paho-mqtt>=1.6",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dnp3 = [
+    "pydnp3==0.1.0",
+]
+
+[project.scripts]
+dreams-outstation = "dreams_outstation.__main__:main"
+dreams-outstation-ui = "dreams_outstation.web_ui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,19 @@
+[Unit]
+Description=DREAMS DNP3 Outstation MQTT Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dreams-outstation
+Environment=DREAMS_MQTT_PASSWORD=change-me
+ExecStart=/opt/dreams-outstation/.venv/bin/python -m dreams_outstation --config /etc/dreams-outstation/config.yaml
+Restart=always
+RestartSec=5
+User=dreams
+Group=dreams
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

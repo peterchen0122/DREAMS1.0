@@ -1,0 +1,42 @@
+mqtt:
+  host: "34.80.23.92"
+  port: 1883
+  username: "dev"
+  password: "change-me"
+  client_id: "dreams-outstation-cloud"
+  root_topic: "DREAMS"
+  keepalive_seconds: 60
+  qos: 1
+
+dnp3:
+  bind: "0.0.0.0"
+  port: 20000
+  master_address: 100
+  application_fragment_size: 2048
+  link_frame_size: 292
+  application_confirm_timeout_seconds: 5
+  enforce_data_send_seconds: 0.5
+  site_buffer_limit: 1024
+  include_spare_point_31: false
+  ai_event_class: "class1"
+
+runtime:
+  sqlite_path: "data/dnp3_buffer.db"
+  log_path: "logs/dreams-outstation.log"
+  periodic_seconds: 900
+  timezone: "Asia/Taipei"
+  dnp3_backend: "auto"
+
+dreams_api:
+  enabled: false
+  base_url: "http://127.0.0.1:8090"
+  plant_meter_no: "test-meter"
+  site_token: "change-me"
+  timeout_seconds: 10
+  verify_tls: true
+  apply_to_sites: true
+
+sites:
+  - logger_id: "*"
+    dnp3_address: 1
+    enabled: true
