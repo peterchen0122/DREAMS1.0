@@ -1281,11 +1281,12 @@ INDEX_HTML = r"""<!doctype html>
                 <th style="width:120px;">Value</th>
                 <th style="width:110px;">Unit</th>
                 <th style="width:90px;">Flags</th>
+                <th style="width:150px;">DNP Time</th>
                 <th style="width:150px;">Received</th>
               </tr>
             </thead>
             <tbody id="eventRows">
-              <tr><td colspan="11" class="empty">No unsolicited/event data yet</td></tr>
+              <tr><td colspan="12" class="empty">No unsolicited/event data yet</td></tr>
             </tbody>
           </table>
         </div>
@@ -1639,7 +1640,7 @@ INDEX_HTML = r"""<!doctype html>
     function renderEvents(events) {
       $('eventCount').textContent = `${events.length} ${events.length === 1 ? 'event' : 'events'}`;
       if (!events.length) {
-        $('eventRows').innerHTML = '<tr><td colspan="11" class="empty">No unsolicited/event data yet</td></tr>';
+        $('eventRows').innerHTML = '<tr><td colspan="12" class="empty">No unsolicited/event data yet</td></tr>';
         return;
       }
       $('eventRows').innerHTML = events.slice().reverse().map(event => `
@@ -1654,6 +1655,7 @@ INDEX_HTML = r"""<!doctype html>
           <td class="mono">${escapeHtml(String(event.engineering_value))}</td>
           <td>${escapeHtml(event.unit || '')}</td>
           <td class="mono">${escapeHtml(event.flags || '')}</td>
+          <td class="mono">${escapeHtml(event.time || '')}</td>
           <td class="mono">${escapeHtml(event.received_at || '')}</td>
         </tr>
       `).join('');

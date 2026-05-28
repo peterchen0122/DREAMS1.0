@@ -95,6 +95,20 @@ class ServiceTests(unittest.TestCase):
 
         service.dnp3.send_measurements.assert_not_called()
 
+    def test_periodic_snapshot_waits_for_full_snapshot(self):
+        with TemporaryDirectory() as tmp:
+            config = _test_config(tmp)
+            service = DreamsOutstationService(config)
+            service.dnp3.send_measurements = Mock()
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "status"),
+                {"ts": 123, "status": "online"},
+            )
+
+            service.send_periodic_snapshot("*")
+
+        service.dnp3.send_measurements.assert_not_called()
+
     def test_binding_change_auto_reloads_effective_dnp3_config(self):
         with TemporaryDirectory() as tmp:
             config = _test_config(tmp)

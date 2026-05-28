@@ -225,6 +225,9 @@ class DreamsOutstationService:
             if not state.online:
                 LOGGER.info("Skipping periodic snapshot for offline logger=%s", site_id)
                 return
+            if state.last_snapshot_ts is None:
+                LOGGER.info("Skipping periodic snapshot for logger=%s until a full snapshot is received", site_id)
+                return
             dnp_values = state.snapshot_dnp()
             payload = {
                 "ts": int(time.time()),

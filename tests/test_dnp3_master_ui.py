@@ -126,6 +126,7 @@ class Dnp3MasterUiTests(unittest.TestCase):
         self.assertIn("Master Poll", INDEX_HTML)
         self.assertIn("Single-ID Analog Output", INDEX_HTML)
         self.assertIn("<th style=\"width:92px;\">Source</th>", INDEX_HTML)
+        self.assertIn("<th style=\"width:150px;\">DNP Time</th>", INDEX_HTML)
         self.assertIn("AO target:", INDEX_HTML)
         self.assertIn("outstation_addresses: selectedMonitorAddresses()", INDEX_HTML)
         self.assertIn("MONITOR_STATUS_REFRESH_MS = 3000", INDEX_HTML)
