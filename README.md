@@ -117,7 +117,7 @@ PYTHONPATH=src \
 .venv-dnp3-py310/bin/python tools/dnp3_master_ui.py --host 0.0.0.0 --port 8090
 ```
 
-本機可打開 `http://127.0.0.1:8090`；同網段設備可用本機區網 IP，例如 `http://172.20.10.3:8090`。打開後，左側操作依照實際流程分成 `DNP3 Endpoint`、`Registered DNP3 IDs`、`Multi-ID Monitor`、`Single-ID Commands`。`Registered DNP3 IDs` 會即時讀取 SQLite 綁定後的 effective config，顯示已註冊 logger、DNP3 ID、Monitor 勾選與 `Use` 按鈕；Outstation UI 新增或修改 logger/DNP3 ID 綁定後，Master UI 會自動刷新清單。`Use` 只會把該 DNP3 ID 帶入 `Command DNP3 ID`，不影響 Monitor 勾選；目前指令目標會在 `DNP3 Endpoint` 和清單列上標示。`Master Poll` 與 `Analog Output` 都只會送到單一 `Command DNP3 ID`。AO UI 固定使用 DREAMS 控制流程的 Object 41 Variation 2 / Function 5 Direct Operate；Master Address 預設 `100`、Wait 預設 `8` 秒，作為模擬器內部 DNP3 連線參數，不顯示在一般操作畫面。
+本機可打開 `http://127.0.0.1:8090`；同網段設備可用本機區網 IP，例如 `http://172.20.10.3:8090`。打開後，左側操作依照實際流程分成 `DNP3 Endpoint`、`Registered DNP3 IDs`、`Multi-ID Monitor`、`Master Poll`、`Single-ID Analog Output`。`Registered DNP3 IDs` 會即時讀取 SQLite 綁定後的 effective config，顯示已註冊 logger、DNP3 ID、Monitor 勾選與 `Use` 按鈕；Outstation UI 新增或修改 logger/DNP3 ID 綁定後，Master UI 會自動刷新清單。Monitor 勾選清單同時也是 `Master Poll` 目標，`Read AI` 與 `Scan Events` 會對每個勾選的 DNP3 ID 逐一輪詢並合併顯示結果。`Use` 只會把該 DNP3 ID 帶入 `Analog Output DNP3 ID`，不影響 Monitor / Poll 勾選；目前 AO 目標會在 `DNP3 Endpoint` 和清單列上標示。只有 `Analog Output` 會送到單一 AO 目標。AO UI 固定使用 DREAMS 控制流程的 Object 41 Variation 2 / Function 5 Direct Operate；Master Address 預設 `100`、Wait 預設 `8` 秒，作為模擬器內部 DNP3 連線參數，不顯示在一般操作畫面。
 
 Master UI 同時提供 DREAMS DNP3 ID 模擬 API：
 
@@ -128,7 +128,9 @@ GET http://127.0.0.1:8090/api/plants/plantMeterNo/test-meter?token=test-token
 可用 `--plant-meter-no` 與 `--site-token` 覆蓋測試電號與 token。
 模擬 API 會讓設定電號回傳目前 effective config 內的 DNP3 ID；輸入其他電號時，會依電號產生穩定的測試 DNP3 ID 清單，方便在 Outstation UI 測試多個電號與多筆 DNP3 ID 分配。
 
-若要模擬 DREAMS Master 常駐接收 Outstation 主動回報，先在 `Registered DNP3 IDs` 清單勾選要監看的 DNP3 ID，再按 `Start Monitor`。Monitor 會對每個勾選的 DNP3 ID 建立長連線、送出 `ENABLE_UNSOLICITED`，之後等待 Outstation 主動送 Class 1 / event 類資料；它不會每秒送 DNP3 polling。Web UI 只在 Monitor 執行中每 3 秒讀取一次本機後端狀態，以更新 `Received Events`、Console 與按鈕狀態。`Received Events` 的 `Source` 會用 `snapshot`、`event`、`cmd_ack` 表示來源：`event` 對應 MQTT `event` topic 的 deadband/變動資料，`cmd_ack` 對應 MQTT `cmd_ack` topic 的指令回饋；DNP3 封包不帶 MQTT topic 名稱，因此 Master UI 會用同一批非週期事件是否包含 AI_18/AI_19 來推斷 `cmd_ack`。Monitor 執行中仍可用 `Command DNP3 ID` 對單一 DNP3 ID 執行 `Read AI`、`Scan Events` 或 AO command。
+若要模擬 DREAMS Master 常駐接收 Outstation 主動回報，先在 `Registered DNP3 IDs` 清單勾選要監看的 DNP3 ID，再按 `Start Monitor`。Monitor 會對每個勾選的 DNP3 ID 建立長連線、送出 `ENABLE_UNSOLICITED`，之後等待 Outstation 主動送 Class 1 / event 類資料；它不會每秒送 DNP3 polling。Web UI 只在 Monitor 執行中每 3 秒讀取一次本機後端狀態，以更新 `Received Events`、Console 與按鈕狀態。`Received Events` 的 `Source` 會用 `snapshot`、`event`、`cmd_ack` 表示來源：`event` 對應 MQTT `event` topic 的 deadband/變動資料，`cmd_ack` 對應 MQTT `cmd_ack` topic 的指令回饋；DNP3 封包不帶 MQTT topic 名稱，因此 Master UI 會用同一批非週期事件是否包含 AI_18/AI_19 來推斷 `cmd_ack`。Monitor 執行中仍可對勾選的多個 DNP3 ID 執行 `Read AI`、`Scan Events`，並可用 `Analog Output DNP3 ID` 對單一 DNP3 ID 執行 AO command。
+
+工研院 DREAMS 測試逐項驗證流程整理在 `docs/ITRI_DREAMS_TEST_VALIDATION.md`。其中 6-1 / 6-2 需要 PV Logger 或 MQTT broker 在資料蒐集器斷電/復歸時送出 `status=offline` / `status=online` 與完整 `snapshot`；Outstation 收到 offline 後會停用該 logger 對應的 DNP3 outstation，收到 online/snapshot/event 後會重新啟用。
 
 先啟動 Outstation：
 

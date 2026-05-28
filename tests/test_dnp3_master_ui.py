@@ -1,6 +1,13 @@
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from tools.dnp3_master_ui import INDEX_HTML, _monitor_addresses, _parse_monitor_events
+from tools.dnp3_master_ui import (
+    INDEX_HTML,
+    _monitor_addresses,
+    _parse_monitor_events,
+    _run_multi_poll,
+)
 
 
 class Dnp3MasterUiTests(unittest.TestCase):
@@ -69,12 +76,58 @@ class Dnp3MasterUiTests(unittest.TestCase):
 
         self.assertEqual([event["source"] for event in events], ["cmd_ack", "cmd_ack", "event"])
 
+    def test_multi_poll_runs_each_selected_dnp3_id(self):
+        defaults = {
+            "host": "127.0.0.1",
+            "port": 20000,
+            "master_address": 100,
+            "outstation_address": 520,
+        }
+        calls = []
+
+        def fake_run(_simulator_path, args, timeout=30):
+            calls.append(args)
+            address = int(args[args.index("--outstation-address") + 1])
+            return {
+                "returncode": 0,
+                "stdout": (
+                    "[task] scan AI range started\n"
+                    f"[0] : {address} : 129 : 2026-05-28 13:30:00\n"
+                    "[task] scan AI range completed\n"
+                ),
+                "stderr": "",
+                "duration_seconds": 0.01,
+                "transmission": [{"outstation_address": address}],
+            }
+
+        with patch("tools.dnp3_master_ui._run_simulator_unlocked", side_effect=fake_run):
+            result = _run_multi_poll(
+                Path("simulator.py"),
+                {"host": "127.0.0.1", "port": 20000, "master_address": 100},
+                defaults,
+                [520, 521],
+                {520: "logger_a", 521: "logger_b"},
+                ["range", "0", "0", "--wait", "8"],
+            )
+
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(result["target_count"], 2)
+        self.assertEqual([item["dnp3_address"] for item in result["results"]], [520, 521])
+        self.assertEqual([item["outstation_address"] for item in result["transmission"]], [520, 521])
+        self.assertIn("--- DNP3 520 logger_a ---", result["stdout"])
+        self.assertEqual(
+            [int(args[args.index("--outstation-address") + 1]) for args in calls],
+            [520, 521],
+        )
+
     def test_html_uses_operator_flow_sections(self):
         self.assertIn("Registered DNP3 IDs", INDEX_HTML)
         self.assertIn("Multi-ID Monitor", INDEX_HTML)
-        self.assertIn("Single-ID Commands", INDEX_HTML)
+        self.assertIn("Master Poll", INDEX_HTML)
+        self.assertIn("Single-ID Analog Output", INDEX_HTML)
         self.assertIn("<th style=\"width:92px;\">Source</th>", INDEX_HTML)
-        self.assertIn("Command target:", INDEX_HTML)
+        self.assertIn("AO target:", INDEX_HTML)
+        self.assertIn("outstation_addresses: selectedMonitorAddresses()", INDEX_HTML)
         self.assertIn("MONITOR_STATUS_REFRESH_MS = 3000", INDEX_HTML)
         self.assertNotIn("setInterval(() => refreshMonitorStatus", INDEX_HTML)
         self.assertNotIn("<h2>DNP3 ID API</h2>", INDEX_HTML)

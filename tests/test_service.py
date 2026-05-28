@@ -63,6 +63,38 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(service.states["*"].snapshot_engineering()[7], 1250)
             self.assertEqual(service.last_mqtt_targets["*"], "logger_test00")
 
+    def test_status_offline_disables_dnp3_site_until_snapshot_returns(self):
+        with TemporaryDirectory() as tmp:
+            config = _test_config(tmp)
+            service = DreamsOutstationService(config)
+            service.dnp3.set_site_online = Mock()
+
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "status"),
+                {"ts": 123, "status": "offline"},
+            )
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "snapshot"),
+                {"ts": 124, "reason": "startup", "data": {"AI_7": 1250}},
+            )
+
+        self.assertEqual(service.dnp3.set_site_online.call_args_list[0].args, ("*", False))
+        self.assertEqual(service.dnp3.set_site_online.call_args_list[1].args, ("*", True))
+
+    def test_periodic_snapshot_skips_offline_logger(self):
+        with TemporaryDirectory() as tmp:
+            config = _test_config(tmp)
+            service = DreamsOutstationService(config)
+            service.dnp3.send_measurements = Mock()
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "status"),
+                {"ts": 123, "status": "offline"},
+            )
+
+            service.send_periodic_snapshot("*")
+
+        service.dnp3.send_measurements.assert_not_called()
+
     def test_binding_change_auto_reloads_effective_dnp3_config(self):
         with TemporaryDirectory() as tmp:
             config = _test_config(tmp)

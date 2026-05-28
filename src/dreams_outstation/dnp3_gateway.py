@@ -21,6 +21,8 @@ class Dnp3Gateway(Protocol):
 
     def send_measurements(self, site_id: str, values: dict[int, int], periodic: bool) -> None: ...
 
+    def set_site_online(self, site_id: str, online: bool) -> None: ...
+
     def set_command_callback(self, callback: AoCommandCallback) -> None: ...
 
 
@@ -38,6 +40,9 @@ class NullDnp3Gateway:
 
     def send_measurements(self, site_id: str, values: dict[int, int], periodic: bool) -> None:
         raise RuntimeError("DNP3 backend is not available")
+
+    def set_site_online(self, site_id: str, online: bool) -> None:
+        return
 
     def set_command_callback(self, callback: AoCommandCallback) -> None:
         self.command_callback = callback
@@ -69,6 +74,7 @@ class Pydnp3Gateway:
         self.outstations: dict[str, object] = {}
         self.outstation_apps: dict[str, object] = {}
         self.command_handlers: dict[str, object] = {}
+        self.site_online: dict[str, bool] = {}
         self.command_callback: AoCommandCallback | None = None
         self.available = False
 
@@ -98,6 +104,7 @@ class Pydnp3Gateway:
             self.outstation_apps[site.key] = app
             self.command_handlers[site.key] = handler
             self.outstations[site.key] = outstation
+            self.site_online[site.key] = True
             LOGGER.info("DNP3 outstation enabled logger=%s address=%s", site.key, site.dnp3_address)
 
         self.available = True
@@ -115,11 +122,14 @@ class Pydnp3Gateway:
             self.outstations.clear()
             self.outstation_apps.clear()
             self.command_handlers.clear()
+            self.site_online.clear()
 
     def send_measurements(self, site_id: str, values: dict[int, int], periodic: bool) -> None:
         outstation = self.outstations.get(site_id)
         if outstation is None:
             raise KeyError(f"No DNP3 outstation for logger {site_id}")
+        if not self.site_online.get(site_id, True):
+            raise RuntimeError(f"DNP3 outstation is offline for logger {site_id}")
 
         flags_value = 0x81 if periodic else 0x01
         flags = self.opendnp3.Flags(flags_value)
@@ -133,6 +143,20 @@ class Pydnp3Gateway:
             builder.Update(measurement, int(index), mode)
         outstation.Apply(builder.Build())
         LOGGER.info("Applied DNP3 measurements logger=%s count=%s periodic=%s", site_id, len(values), periodic)
+
+    def set_site_online(self, site_id: str, online: bool) -> None:
+        outstation = self.outstations.get(site_id)
+        if outstation is None:
+            LOGGER.warning("Cannot set DNP3 site online=%s; unknown logger=%s", online, site_id)
+            return
+        if self.site_online.get(site_id, True) == online:
+            return
+        if online:
+            outstation.Enable()
+        else:
+            outstation.Disable()
+        self.site_online[site_id] = online
+        LOGGER.info("DNP3 outstation %s logger=%s", "enabled" if online else "disabled", site_id)
 
     def _build_stack_config(self, site: SiteConfig):
         max_index = max(enabled_ai_points(self.config.dnp3.include_spare_point_31).keys())

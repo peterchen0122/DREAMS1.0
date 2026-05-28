@@ -94,12 +94,14 @@ class DreamsOutstationService:
             state = self.states[logger_key]
             if suffix == "snapshot":
                 changed = state.apply_snapshot(payload)
+                self.dnp3.set_site_online(logger_key, True)
                 LOGGER.info("Snapshot received logger=%s key=%s changed=%s", topic.logger_id, logger_key, len(changed))
                 reason = str(payload.get("reason", "")).lower()
                 if reason in {"startup", "periodic"}:
                     self.send_periodic_snapshot(logger_key)
             elif suffix == "event":
                 changed = state.apply_event(payload)
+                self.dnp3.set_site_online(logger_key, True)
                 dnp_values = state.dnp_values_for_changed(changed)
                 LOGGER.info("Deadband event received logger=%s key=%s points=%s", topic.logger_id, logger_key, sorted(dnp_values))
                 if dnp_values:
@@ -108,6 +110,7 @@ class DreamsOutstationService:
                 self.handle_command_ack(logger_key, payload, logger_id=topic.logger_id)
             elif suffix == "status":
                 state.apply_status(payload)
+                self.dnp3.set_site_online(logger_key, state.online)
                 LOGGER.info("Status received logger=%s key=%s status=%s", topic.logger_id, logger_key, payload.get("status"))
             else:
                 LOGGER.debug("Ignoring MQTT suffix=%s logger=%s", topic.suffix, topic.logger_id)
@@ -219,6 +222,9 @@ class DreamsOutstationService:
     def send_periodic_snapshot(self, site_id: str) -> None:
         with self._lock:
             state = self.states[site_id]
+            if not state.online:
+                LOGGER.info("Skipping periodic snapshot for offline logger=%s", site_id)
+                return
             dnp_values = state.snapshot_dnp()
             payload = {
                 "ts": int(time.time()),

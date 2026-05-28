@@ -323,7 +323,7 @@ def _monitor_addresses(data: dict[str, Any], defaults: dict[str, Any]) -> list[i
             seen.add(address)
             addresses.append(address)
     if not addresses:
-        raise ValueError("Select at least one DNP3 ID to monitor")
+        raise ValueError("Select at least one DNP3 ID")
     return addresses
 
 
@@ -353,28 +353,86 @@ def _simulator_command(simulator_path: Path, args: list[str]) -> list[str]:
     return [str(python), str(simulator_path), *args]
 
 
+def _run_simulator_unlocked(simulator_path: Path, args: list[str], timeout: float = 30) -> dict[str, Any]:
+    start = time.time()
+    process = subprocess.run(
+        _simulator_command(simulator_path, args),
+        cwd=PROJECT_ROOT,
+        env=_simulator_env(),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+    )
+    return {
+        "returncode": process.returncode,
+        "stdout": process.stdout,
+        "stderr": process.stderr,
+        "duration_seconds": round(time.time() - start, 3),
+        "transmission": _parse_transmission(process.stdout),
+    }
+
+
 def _run_simulator(simulator_path: Path, args: list[str], timeout: float = 30) -> dict[str, Any]:
     if not OPERATION_LOCK.acquire(blocking=False):
         raise RuntimeError("Another DNP3 operation is already running")
-    start = time.time()
     try:
-        process = subprocess.run(
-            _simulator_command(simulator_path, args),
-            cwd=PROJECT_ROOT,
-            env=_simulator_env(),
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-        )
-        return {
-            "returncode": process.returncode,
-            "stdout": process.stdout,
-            "stderr": process.stderr,
-            "duration_seconds": round(time.time() - start, 3),
-            "transmission": _parse_transmission(process.stdout),
-        }
+        return _run_simulator_unlocked(simulator_path, args, timeout)
     finally:
         OPERATION_LOCK.release()
+
+
+def _run_multi_poll(
+    simulator_path: Path,
+    data: dict[str, Any],
+    defaults: dict[str, Any],
+    addresses: list[int],
+    logger_by_address: dict[int, str],
+    command_args: list[str],
+) -> dict[str, Any]:
+    if not OPERATION_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another DNP3 operation is already running")
+
+    started = time.time()
+    results: list[dict[str, Any]] = []
+    transmissions: list[dict[str, Any]] = []
+    try:
+        for address in addresses:
+            target_data = {**data, "outstation_address": address}
+            result = _run_simulator_unlocked(
+                simulator_path,
+                [
+                    *_base_simulator_args(target_data, defaults),
+                    *command_args,
+                ],
+            )
+            result["dnp3_address"] = address
+            result["logger_id"] = logger_by_address.get(address, "")
+            results.append(result)
+            transmissions.extend(result.get("transmission") or [])
+    finally:
+        OPERATION_LOCK.release()
+
+    stdout = "\n".join(_target_output(result, "stdout") for result in results if result.get("stdout")).strip()
+    stderr = "\n".join(_target_output(result, "stderr") for result in results if result.get("stderr")).strip()
+    returncodes = [int(result.get("returncode", 1)) for result in results]
+    returncode = next((code for code in returncodes if code != 0), 0 if returncodes else 1)
+    return {
+        "returncode": returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "duration_seconds": round(time.time() - started, 3),
+        "transmission": transmissions,
+        "results": results,
+        "target_count": len(addresses),
+    }
+
+
+def _target_output(result: dict[str, Any], key: str) -> str:
+    text = str(result.get(key) or "").strip()
+    if not text:
+        return ""
+    logger = f" {result['logger_id']}" if result.get("logger_id") else ""
+    return f"--- DNP3 {result['dnp3_address']}{logger} ---\n{text}"
 
 
 class MultiMonitorProcess:
@@ -632,31 +690,59 @@ class MasterUiHandler(BaseHTTPRequestHandler):
     def _handle_range(self, data: dict[str, Any]) -> None:
         start = _validated_int(data, "start", 0, 0, 65535)
         stop = _validated_int(data, "stop", 32, start, 65535)
-        args = [
-            *_base_simulator_args(data, self.state.defaults),
-            "range",
-            str(start),
-            str(stop),
-            "--wait",
-            str(_validated_int(data, "wait", 8, 1, 120)),
-        ]
-        result = _run_simulator(self.state.simulator_path, args)
-        result["points"] = _parse_ai_range(result["stdout"], start, stop)
+        config_payload = self.state.refresh_config()
+        defaults = config_payload["defaults"]
+        logger_by_address = _logger_by_dnp3_address(config_payload["id_api"])
+        addresses = _monitor_addresses(data, defaults)
+        result = _run_multi_poll(
+            self.state.simulator_path,
+            data,
+            defaults,
+            addresses,
+            logger_by_address,
+            [
+                "range",
+                str(start),
+                str(stop),
+                "--wait",
+                str(_validated_int(data, "wait", 8, 1, 120)),
+            ],
+        )
+        points: list[dict[str, Any]] = []
+        for item in result["results"]:
+            address = int(item["dnp3_address"])
+            logger_id = str(item.get("logger_id") or "")
+            points.extend(
+                {
+                    **point,
+                    "dnp3_address": address,
+                    "logger_id": logger_id,
+                }
+                for point in _parse_ai_range(str(item.get("stdout") or ""), start, stop)
+            )
+        result["points"] = points
         self._send_json(result)
 
     def _handle_scan(self, data: dict[str, Any]) -> None:
         classes = str(data.get("classes") or "events")
         if classes not in {"events", "class0", "all"}:
             raise ValueError("classes must be events, class0, or all")
-        args = [
-            *_base_simulator_args(data, self.state.defaults),
-            "scan",
-            "--classes",
-            classes,
-            "--wait",
-            str(_validated_int(data, "wait", 8, 1, 120)),
-        ]
-        result = _run_simulator(self.state.simulator_path, args)
+        config_payload = self.state.refresh_config()
+        defaults = config_payload["defaults"]
+        result = _run_multi_poll(
+            self.state.simulator_path,
+            data,
+            defaults,
+            _monitor_addresses(data, defaults),
+            _logger_by_dnp3_address(config_payload["id_api"]),
+            [
+                "scan",
+                "--classes",
+                classes,
+                "--wait",
+                str(_validated_int(data, "wait", 8, 1, 120)),
+            ],
+        )
         self._send_json(result)
 
     def _handle_ao(self, data: dict[str, Any]) -> None:
@@ -1032,7 +1118,7 @@ INDEX_HTML = r"""<!doctype html>
       <h1>DNP3 Master Simulator</h1>
       <div class="header-summary">
         <span id="headerMonitor" class="summary-chip">Monitor: stopped</span>
-        <span id="headerCommand" class="summary-chip">Command: not set</span>
+        <span id="headerCommand" class="summary-chip">AO: not set</span>
       </div>
     </div>
     <div id="status" class="status"><span class="dot"></span><span>Idle</span></div>
@@ -1050,7 +1136,7 @@ INDEX_HTML = r"""<!doctype html>
               <input id="port" type="number" min="1" max="65535" value="20000">
             </label>
           </div>
-          <label>Command DNP3 ID
+          <label>Analog Output DNP3 ID
             <input id="outstationAddress" type="number" min="0" max="65535" value="1">
           </label>
           <input id="wait" type="hidden" value="8">
@@ -1071,7 +1157,7 @@ INDEX_HTML = r"""<!doctype html>
                 <th style="width:82px;">Monitor</th>
                 <th>Logger</th>
                 <th style="width:92px;">DNP3 ID</th>
-                <th style="width:92px;">Command</th>
+                <th style="width:92px;">AO Target</th>
               </tr>
             </thead>
             <tbody id="idApiPlantRows">
@@ -1094,31 +1180,32 @@ INDEX_HTML = r"""<!doctype html>
       </section>
 
       <section>
-        <div class="panel-head"><h2>Single-ID Commands</h2></div>
+        <div class="panel-head"><h2>Master Poll</h2></div>
         <div class="panel-body stack">
-          <div class="subsection">
-            <div class="section-label">Master Poll</div>
-            <div class="button-row">
-              <button id="readAi" class="primary">Read AI</button>
-              <button id="scanEvents">Scan Events</button>
-            </div>
-            <div id="pollResult" class="result-line"></div>
+          <div id="pollTargets" class="result-line">0 DNP3 ID selected</div>
+          <div class="button-row">
+            <button id="readAi" class="primary">Read AI</button>
+            <button id="scanEvents">Scan Events</button>
           </div>
-          <div class="subsection">
-            <div class="section-label">Analog Output</div>
-            <label>AO Point
-              <select id="aoPoint"></select>
-            </label>
-            <label>Raw Value
-              <input id="aoValue" type="number" step="any" value="50">
-            </label>
-            <input id="variation" type="hidden" value="int16">
-            <input id="operationMode" type="hidden" value="direct">
-            <div class="button-row">
-              <button id="sendAo" class="primary">Operate</button>
-            </div>
-            <div id="aoResult" class="result-line"></div>
+          <div id="pollResult" class="result-line"></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="panel-head"><h2>Single-ID Analog Output</h2></div>
+        <div class="panel-body stack">
+          <label>AO Point
+            <select id="aoPoint"></select>
+          </label>
+          <label>Raw Value
+            <input id="aoValue" type="number" step="any" value="50">
+          </label>
+          <input id="variation" type="hidden" value="int16">
+          <input id="operationMode" type="hidden" value="direct">
+          <div class="button-row">
+            <button id="sendAo" class="primary">Operate</button>
           </div>
+          <div id="aoResult" class="result-line"></div>
         </div>
       </section>
     </div>
@@ -1127,12 +1214,14 @@ INDEX_HTML = r"""<!doctype html>
       <section>
         <div class="panel-head">
           <h2>Polled AI</h2>
-          <span id="pointCount" class="result-line">0 points</span>
+          <span id="pointCount" class="result-line">0 values</span>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
+                <th style="width:92px;">DNP3 ID</th>
+                <th style="width:130px;">Logger</th>
                 <th style="width:76px;">Point</th>
                 <th>Name</th>
                 <th style="width:120px;">Raw</th>
@@ -1142,7 +1231,7 @@ INDEX_HTML = r"""<!doctype html>
               </tr>
             </thead>
             <tbody id="aiRows">
-              <tr><td colspan="6" class="empty">No AI scan yet</td></tr>
+              <tr><td colspan="8" class="empty">No AI scan yet</td></tr>
             </tbody>
           </table>
         </div>
@@ -1246,22 +1335,44 @@ INDEX_HTML = r"""<!doctype html>
 
     function commandTargetText() {
       const address = commandTargetAddress();
-      if (address === null) return 'Command target is not set';
+      if (address === null) return 'AO target is not set';
       const plant = commandTargetPlant();
       if (plant) {
         const logger = plant.loggerId || '-';
-        return `Command target: ${logger} / DNP3 ${address}`;
+        return `AO target: ${logger} / DNP3 ${address}`;
       }
-      return `Command target: DNP3 ${address}`;
+      return `AO target: DNP3 ${address}`;
     }
 
     function commandTargetHeaderText() {
-      return commandTargetText().replace('Command target', 'Command');
+      return commandTargetText().replace('AO target', 'AO');
     }
 
     function updateCommandButtons() {
-      const disabled = state.busy || commandTargetAddress() === null;
-      for (const id of ['readAi', 'scanEvents', 'sendAo']) {
+      const pollDisabled = state.busy || selectedMonitorAddresses().length === 0;
+      for (const id of ['readAi', 'scanEvents']) {
+        $(id).disabled = pollDisabled;
+      }
+      const aoDisabled = state.busy || commandTargetAddress() === null;
+      for (const id of ['sendAo']) {
+        $(id).disabled = aoDisabled;
+      }
+    }
+
+    function selectedAddressPayload() {
+      return { ...settings(), outstation_addresses: selectedMonitorAddresses() };
+    }
+
+    function pollTargetText(data) {
+      const count = Number(data?.target_count || selectedMonitorAddresses().length || 0);
+      return `${count} ${count === 1 ? 'DNP3 ID' : 'DNP3 IDs'}`;
+    }
+
+    function updatePollTargets(addresses) {
+      const label = addresses.length === 1 ? 'DNP3 ID' : 'DNP3 IDs';
+      $('pollTargets').textContent = `${addresses.length} ${label} selected${addresses.length ? `: ${addresses.join(', ')}` : ''}`;
+      const disabled = state.busy || addresses.length === 0;
+      for (const id of ['readAi', 'scanEvents']) {
         $(id).disabled = disabled;
       }
     }
@@ -1449,13 +1560,15 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderAi(points) {
-      $('pointCount').textContent = `${points.length} points`;
+      $('pointCount').textContent = `${points.length} ${points.length === 1 ? 'value' : 'values'}`;
       if (!points.length) {
-        $('aiRows').innerHTML = '<tr><td colspan="6" class="empty">No AI values returned</td></tr>';
+        $('aiRows').innerHTML = '<tr><td colspan="8" class="empty">No AI values returned</td></tr>';
         return;
       }
       $('aiRows').innerHTML = points.map(point => `
         <tr>
+          <td class="mono">${escapeHtml(point.dnp3_address ?? '')}</td>
+          <td class="mono">${escapeHtml(point.logger_id || '')}</td>
           <td class="mono">${point.key}</td>
           <td title="${escapeHtml(point.name)}">${escapeHtml(point.name)}</td>
           <td class="mono">${escapeHtml(String(point.raw_value))}</td>
@@ -1605,6 +1718,7 @@ INDEX_HTML = r"""<!doctype html>
       const label = addresses.length === 1 ? 'DNP3 ID' : 'DNP3 IDs';
       $('monitorTargets').textContent = `${addresses.length} ${label} selected${addresses.length ? `: ${addresses.join(', ')}` : ''}`;
       $('startMonitor').disabled = state.monitor || state.busy || addresses.length === 0;
+      updatePollTargets(addresses);
       updateHeaderMonitor();
     }
 
@@ -1621,11 +1735,11 @@ INDEX_HTML = r"""<!doctype html>
       setBusy(true);
       $('pollResult').textContent = '';
       try {
-        const data = await api('/api/range', { ...settings(), start: 0, stop: 32 });
+        const data = await api('/api/range', { ...selectedAddressPayload(), start: 0, stop: 32 });
         renderAi(data.points || []);
         renderTransmission(data.transmission || []);
-        appendConsole('Read AI_0..AI_32', data);
-        $('pollResult').textContent = data.returncode === 0 ? 'AI scan completed' : 'AI scan returned an error';
+        appendConsole(`Read AI_0..AI_32 (${pollTargetText(data)})`, data);
+        $('pollResult').textContent = data.returncode === 0 ? `AI scan completed for ${pollTargetText(data)}` : 'AI scan returned an error';
         setStatus(data.returncode === 0 ? 'Last scan OK' : 'Scan error', data.returncode === 0 ? 'ok' : 'err');
       } catch (error) {
         $('pollResult').textContent = error.message;
@@ -1639,10 +1753,10 @@ INDEX_HTML = r"""<!doctype html>
       setBusy(true);
       $('pollResult').textContent = '';
       try {
-        const data = await api('/api/scan', { ...settings(), classes: 'events' });
+        const data = await api('/api/scan', { ...selectedAddressPayload(), classes: 'events' });
         renderTransmission(data.transmission || []);
-        appendConsole('Scan Events', data);
-        $('pollResult').textContent = data.returncode === 0 ? 'Event scan completed' : 'Event scan returned an error';
+        appendConsole(`Scan Events (${pollTargetText(data)})`, data);
+        $('pollResult').textContent = data.returncode === 0 ? `Event scan completed for ${pollTargetText(data)}` : 'Event scan returned an error';
         setStatus(data.returncode === 0 ? 'Last scan OK' : 'Scan error', data.returncode === 0 ? 'ok' : 'err');
       } catch (error) {
         $('pollResult').textContent = error.message;
@@ -1676,7 +1790,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function monitorPayload() {
-      return { ...settings(), outstation_addresses: selectedMonitorAddresses() };
+      return selectedAddressPayload();
     }
 
     function monitorStatusText(data) {

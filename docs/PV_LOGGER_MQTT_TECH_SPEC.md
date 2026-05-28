@@ -263,6 +263,7 @@ Payload 範例：
 | `offline` | Logger 離線 |
 
 其他欄位如 `firmware`、`ip`、`rssi`、`message` 可作為診斷資訊，Outstation 目前只用 `status` 判斷 online/offline。
+收到 `status=offline` 時，Outstation 會停用該 logger 對應的 DNP3 outstation，讓 DREAMS Master 可判斷該 DNP3 ID 離線；收到 `status=online`、`snapshot` 或 `event` 後會重新啟用。若資料蒐集器斷電無法主動發布 offline，PV Logger / broker 必須用 MQTT Last Will 或雲端監控機制代送 `status=offline`。
 
 ## 10. Command
 
@@ -427,7 +428,7 @@ Master Poll 類指令不會發 MQTT `cmd`：
 | DNP3 Object | Object 41 |
 | Variation | Variation 2, 16-bit Analog Output Block |
 | Function | Function 5, Direct Operate |
-| Command target | 單一 DNP3 ID |
+| AO target | 單一 DNP3 ID |
 
 ### 12.1 Master Poll 範例
 
@@ -637,8 +638,8 @@ value = raw_value * 0.01
 
 1. 打開 Master Simulator UI：`http://127.0.0.1:8090/`
 2. 在 `Registered DNP3 IDs` 找到 `logger_test02 / DNP3 520`。
-3. 按 `Use`，讓 `Command DNP3 ID` 指向 `520`。
-4. 在 `Single-ID Commands` 的 `Analog Output` 選擇 AO point。
+3. 按 `Use`，讓 `Analog Output DNP3 ID` 指向 `520`。
+4. 在 `Single-ID Analog Output` 選擇 AO point。
 5. 輸入 raw value。
 6. 按 `Operate`。
 7. PV Logger 應收到 `DREAMS/logger_test02/cmd`。
