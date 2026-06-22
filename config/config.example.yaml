@@ -18,7 +18,10 @@ dnp3:
   enforce_data_send_seconds: 0.5
   site_buffer_limit: 1024
   include_spare_point_31: false
-  ai_event_class: "class1"
+  # pydnp3/opendnp3 binds one event class per point. DREAMS Appendix II expects
+  # deadband/change events to be Class2, while this bridge still distinguishes
+  # periodic snapshots by Object 32 Var 3 flag bit 7.
+  ai_event_class: "class2"
 
 runtime:
   sqlite_path: "data/dnp3_buffer.db"

@@ -263,7 +263,7 @@ Payload 範例：
 | `offline` | Logger 離線 |
 
 其他欄位如 `firmware`、`ip`、`rssi`、`message` 可作為診斷資訊，Outstation 目前只用 `status` 判斷 online/offline。
-收到 `status=offline` 時，Outstation 會停用該 logger 對應的 DNP3 outstation，讓 DREAMS Master 可判斷該 DNP3 ID 離線；收到 `status=online`、`snapshot` 或 `event` 後會重新啟用。若資料蒐集器斷電無法主動發布 offline，PV Logger / broker 必須用 MQTT Last Will 或雲端監控機制代送 `status=offline`。
+收到 `status=offline` 時，Outstation 會更新該 logger 的 UI 狀態、停止該 logger 的週期快照送出，並停用該 logger 對應的 DNP3 ID，讓 Master 對該 ID 的 poll / keep alive 無回應並判定離線；收到 `status=online`、`snapshot` 或 `event` 後會恢復該 logger 的在線資料狀態與 DNP3 ID 回應。TCP server 是否可連只代表 Outstation service 是否活著，不代表每一台機器在線。若資料蒐集器斷電無法主動發布 offline，PV Logger / broker 必須用 MQTT Last Will 或雲端監控機制代送 `status=offline`。
 
 ## 10. Command
 

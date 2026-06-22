@@ -109,9 +109,18 @@ class DreamsOutstationService:
             elif suffix == "cmd_ack":
                 self.handle_command_ack(logger_key, payload, logger_id=topic.logger_id)
             elif suffix == "status":
-                state.apply_status(payload)
-                self.dnp3.set_site_online(logger_key, state.online)
-                LOGGER.info("Status received logger=%s key=%s status=%s", topic.logger_id, logger_key, payload.get("status"))
+                status_value = payload.get("status", payload.get("online", payload.get("state")))
+                online = state.apply_status(payload)
+                if online is None:
+                    LOGGER.info(
+                        "Ignoring MQTT status without online/offline value logger=%s key=%s payload=%s",
+                        topic.logger_id,
+                        logger_key,
+                        payload,
+                    )
+                    return
+                self.dnp3.set_site_online(logger_key, online)
+                LOGGER.info("Status received logger=%s key=%s status=%s", topic.logger_id, logger_key, status_value)
             else:
                 LOGGER.debug("Ignoring MQTT suffix=%s logger=%s", topic.suffix, topic.logger_id)
 

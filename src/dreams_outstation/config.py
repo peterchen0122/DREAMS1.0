@@ -53,7 +53,7 @@ def load_config(path: str | Path) -> AppConfig:
         enforce_data_send_seconds=float(_get(dnp3_raw, "enforce_data_send_seconds", 0.5)),
         site_buffer_limit=int(_get(dnp3_raw, "site_buffer_limit", 1024)),
         include_spare_point_31=bool(_get(dnp3_raw, "include_spare_point_31", False)),
-        ai_event_class=str(_get(dnp3_raw, "ai_event_class", "class1")).lower(),
+        ai_event_class=str(_get(dnp3_raw, "ai_event_class", "class2")).lower(),
     )
 
     runtime = RuntimeConfig(

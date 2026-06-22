@@ -101,6 +101,7 @@ class Pydnp3Gateway:
             handler = _make_command_handler(self.opendnp3, site.key, self._handle_ao_command)
             outstation = self.channel.AddOutstation(f"site-{site.key}", handler, app, stack_config)
             outstation.Enable()
+            self._set_restart_iin(outstation, site.key)
             self.outstation_apps[site.key] = app
             self.command_handlers[site.key] = handler
             self.outstations[site.key] = outstation
@@ -169,6 +170,9 @@ class Pydnp3Gateway:
         stack_config.outstation.params.unsolConfirmTimeout = self.openpal.TimeDuration.Seconds(
             self.config.dnp3.application_confirm_timeout_seconds
         )
+        stack_config.outstation.params.unsolRetryTimeout = self.openpal.TimeDuration.Seconds(
+            self.config.dnp3.application_confirm_timeout_seconds
+        )
         stack_config.outstation.params.solConfirmTimeout = self.openpal.TimeDuration.Seconds(
             self.config.dnp3.application_confirm_timeout_seconds
         )
@@ -204,6 +208,14 @@ class Pydnp3Gateway:
             return False
         return self.command_callback(site_id, ao_index, value)
 
+    def _set_restart_iin(self, outstation, site_id: str) -> None:
+        try:
+            outstation.SetRestartIIN()
+        except Exception:
+            LOGGER.exception("Failed to set DNP3 restart IIN logger=%s", site_id)
+        else:
+            LOGGER.info("DNP3 restart IIN set logger=%s", site_id)
+
 
 def _make_outstation_application(opendnp3):
     class Impl(opendnp3.IOutstationApplication):
@@ -211,10 +223,10 @@ def _make_outstation_application(opendnp3):
             super().__init__()
 
         def ColdRestartSupport(self):
-            return opendnp3.RestartMode.UNSUPPORTED
+            return opendnp3.RestartMode.SUPPORTED_DELAY_COARSE
 
         def WarmRestartSupport(self):
-            return opendnp3.RestartMode.UNSUPPORTED
+            return opendnp3.RestartMode.SUPPORTED_DELAY_COARSE
 
         def SupportsAssignClass(self):
             return False

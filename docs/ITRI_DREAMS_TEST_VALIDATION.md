@@ -56,7 +56,7 @@ PYTHONPATH=src \
 | 4-1 DREAMS 離線 31 分後恢復 | 保持 Outstation 與 PV Logger 運行，只中斷 Master/DREAMS 連線 31 分鐘後恢復。 | 恢復連線後兩案場在線，至少收到 2 筆離線期間的 periodic snapshot/event。 | 不要停 Outstation service；DNP3 event buffer 才能累積離線期間資料。 |
 | 5-1 雲端系統離線 | 停止 Outstation service 或阻斷固定 IP DNP3 TCP。 | Master/DREAMS 看到所有案場離線或連線失敗。 | 這是雲端系統整體離線，不是單一 logger 離線。 |
 | 5-2 雲端系統重啟 | 重啟 Outstation service，PV Logger 在 MQTT 重連後送 `status=online` 與完整 `snapshot`。 | Master/DREAMS 可 Poll 到兩案場最近一筆完整資料。 | `status=online` 只代表在線；必須再送 startup snapshot，Outstation 才會有完整最新點值。 |
-| 6-1 現場資料蒐集器斷電 | 關閉 ID `1` 的 PV Logger/資料蒐集器，讓 broker LWT 或系統送 `status=offline`。 | Master/DREAMS 看到 ID `1` 離線；ID `2` 不受影響。 | Outstation 收到 `status=offline` 後會停用該 DNP3 outstation。 |
+| 6-1 現場資料蒐集器斷電 | 關閉 ID `1` 的 PV Logger/資料蒐集器，讓 broker LWT 或系統送 `status=offline`。 | Master/DREAMS 對 ID `1` poll / keep alive 無回應並看到 ID `1` 離線；ID `2` 不受影響；TCP 端點檢查仍可顯示 Outstation service 活著。 | `status=offline` 會停用該 logger 對應的 DNP3 ID，不是直接把 MQTT status 顯示給 Master。正式 6-1 至少需綁定 ID `1` 與 ID `2`，才能證明單一現場離線不影響其他案場。 |
 | 6-2 現場資料蒐集器復歸 | ID `1` 復電後送 `status=online` 與完整 `snapshot`。 | Master/DREAMS 收到 ID `1` 最近一筆定時資料，Poll / Monitor 恢復。 | `snapshot` 必須是完整資料。 |
 | 7-1 固定 IP Nessus | 對受測固定 IP 做 Basic Network Scan。 | 報告無 Medium 以上弱點。 | 與程式功能無關，但會卡驗證。 |
 | 7-2 Web Portal Nessus | 對受測 Web Portal 做 Web Application Test。 | 報告無 Medium 以上弱點。 | Outstation UI 若對外開放，需改強密碼、限制來源 IP、避免預設帳密。 |

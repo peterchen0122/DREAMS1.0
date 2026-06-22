@@ -34,6 +34,26 @@ class SiteStateTests(unittest.TestCase):
         self.assertNotIn(11, dnp_values)
         self.assertEqual(dnp_values[7], 20)
 
+    def test_status_updates_online_state_without_ai_mapping(self):
+        state = SiteState("1", include_spare_point_31=True)
+
+        offline = state.apply_status({"ts": 1715000900, "status": "offline"})
+        online = state.apply_status({"ts": 1715000910, "online": True})
+
+        self.assertFalse(offline)
+        self.assertTrue(online)
+        self.assertEqual(state.snapshot_engineering()[31], 0.0)
+        self.assertEqual(state.snapshot_engineering()[32], 1715000910)
+
+    def test_unknown_status_payload_does_not_change_online_state(self):
+        state = SiteState("1", include_spare_point_31=True)
+        state.apply_status({"status": "online"})
+
+        changed = state.apply_status({"message": "heartbeat"})
+
+        self.assertIsNone(changed)
+        self.assertTrue(state.online)
+
 
 if __name__ == "__main__":
     unittest.main()

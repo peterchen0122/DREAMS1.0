@@ -17,6 +17,7 @@ class PointTableTests(unittest.TestCase):
     def test_spare_31_is_disabled_by_default(self):
         self.assertNotIn(31, enabled_ai_points())
         self.assertIn(31, enabled_ai_points(include_spare_point_31=True))
+        self.assertEqual(AI_POINTS[31].name, "Spare")
 
     def test_deadband_ao_raw_value_is_001_percent(self):
         payload = build_mqtt_command(12, 250, "cmd-1")

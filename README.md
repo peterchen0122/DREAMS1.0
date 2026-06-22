@@ -130,7 +130,7 @@ GET http://127.0.0.1:8090/api/plants/plantMeterNo/test-meter?token=test-token
 
 若要模擬 DREAMS Master 常駐接收 Outstation 主動回報，先在 `Registered DNP3 IDs` 清單勾選要監看的 DNP3 ID，再按 `Start Monitor`。Monitor 會對每個勾選的 DNP3 ID 建立長連線、送出 `ENABLE_UNSOLICITED`，之後等待 Outstation 主動送 Class 1 / event 類資料；它不會每秒送 DNP3 polling。Web UI 只在 Monitor 執行中每 3 秒讀取一次本機後端狀態，以更新 `Received Events`、Console 與按鈕狀態。`Received Events` 的 `Source` 會用 `snapshot`、`event`、`cmd_ack` 表示來源：`event` 對應 MQTT `event` topic 的 deadband/變動資料，`cmd_ack` 對應 MQTT `cmd_ack` topic 的指令回饋；DNP3 封包不帶 MQTT topic 名稱，因此 Master UI 會用同一批非週期事件是否包含 AI_18/AI_19 來推斷 `cmd_ack`。Monitor 執行中仍可對勾選的多個 DNP3 ID 執行 `Read AI`、`Scan Events`，並可用 `Analog Output DNP3 ID` 對單一 DNP3 ID 執行 AO command。
 
-工研院 DREAMS 測試逐項驗證流程整理在 `docs/ITRI_DREAMS_TEST_VALIDATION.md`。其中 6-1 / 6-2 需要 PV Logger 或 MQTT broker 在資料蒐集器斷電/復歸時送出 `status=offline` / `status=online` 與完整 `snapshot`；Outstation 收到 offline 後會停用該 logger 對應的 DNP3 outstation，收到 online/snapshot/event 後會重新啟用。
+工研院 DREAMS 測試逐項驗證流程整理在 `docs/ITRI_DREAMS_TEST_VALIDATION.md`。其中 6-1 / 6-2 需要 PV Logger 或 MQTT broker 在資料蒐集器斷電/復歸時送出 `status=offline` / `status=online` 與完整 `snapshot`；Outstation 收到 offline 後會停用該 logger 對應的 DNP3 ID，讓 Master 對該 ID 的 poll / keep alive 無回應並判定離線。TCP server 是否可連只代表 Outstation service 是否活著，不代表每一台機器在線；收到 online/snapshot/event 後會恢復該 logger 的 DNP3 ID 回應。
 
 先啟動 Outstation：
 
@@ -200,4 +200,4 @@ python3 -m venv /opt/dreams-outstation/.venv
 - DREAMS Master IP 白名單
 - ITRI lab 對 `pydnp3` event class 配置的驗證結果
 
-注意：`pydnp3/opendnp3` 對每個 AI 點只能設定單一 event class；目前預設使用 Class 1，並用 Object 32 Var 3 flag bit 7 區分定時/Dead Band。MQTT `event` topic 對應 deadband/變動資料；MQTT `cmd_ack` topic 是 AO 指令回饋，DNP3 端同樣會以非週期 event 類資料送出 AI_18/AI_19 與對應 feedback AI。若 ITRI 測試要求 Object 60 Var 3 必須掃到同一批 AI Dead Band 事件，需要再調整 DNP3 stack 或改用可客製 event class 的實作。
+注意：`pydnp3/opendnp3` 對每個 AI 點只能設定單一 event class；目前預設使用 Class 2，並用 Object 32 Var 3 flag bit 7 區分定時/Dead Band。MQTT `event` topic 對應 deadband/變動資料；MQTT `cmd_ack` topic 是 AO 指令回饋，DNP3 端同樣會以非週期 event 類資料送出 AI_18/AI_19 與對應 feedback AI。若 ITRI 測試要求同一 AI 點須同時用 Class 1 定時與 Class 2 Dead Band，需要再調整 DNP3 stack 或改用可客製 event class 的實作。

@@ -78,8 +78,53 @@ class ServiceTests(unittest.TestCase):
                 {"ts": 124, "reason": "startup", "data": {"AI_7": 1250}},
             )
 
-        self.assertEqual(service.dnp3.set_site_online.call_args_list[0].args, ("*", False))
-        self.assertEqual(service.dnp3.set_site_online.call_args_list[1].args, ("*", True))
+        self.assertEqual(
+            [call.args for call in service.dnp3.set_site_online.call_args_list],
+            [("*", False), ("*", True)],
+        )
+
+    def test_status_updates_dnp3_availability_without_sending_measurement(self):
+        with TemporaryDirectory() as tmp:
+            config = _test_config(tmp)
+            config = replace(config, dnp3=replace(config.dnp3, include_spare_point_31=True))
+            service = DreamsOutstationService(config)
+            service.dnp3.available = True
+            service.dnp3.send_measurements = Mock()
+            service.dnp3.set_site_online = Mock()
+
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "status"),
+                {"ts": 123, "status": "offline"},
+            )
+
+        service.dnp3.send_measurements.assert_not_called()
+        service.dnp3.set_site_online.assert_called_once_with("*", False)
+
+    def test_status_online_enables_dnp3_site(self):
+        with TemporaryDirectory() as tmp:
+            config = _test_config(tmp)
+            service = DreamsOutstationService(config)
+            service.dnp3.set_site_online = Mock()
+
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "status"),
+                {"ts": 123, "status": "online"},
+            )
+
+        service.dnp3.set_site_online.assert_called_once_with("*", True)
+
+    def test_unknown_status_payload_does_not_change_dnp3_site_availability(self):
+        with TemporaryDirectory() as tmp:
+            config = _test_config(tmp)
+            service = DreamsOutstationService(config)
+            service.dnp3.set_site_online = Mock()
+
+            service.handle_mqtt_message(
+                MqttTopic("logger_test00", "status"),
+                {"ts": 123, "message": "heartbeat"},
+            )
+
+        service.dnp3.set_site_online.assert_not_called()
 
     def test_periodic_snapshot_skips_offline_logger(self):
         with TemporaryDirectory() as tmp:

@@ -12,6 +12,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.mqtt.port, 1883)
         self.assertEqual(config.mqtt.username, "dev")
         self.assertEqual(config.dnp3.port, 20000)
+        self.assertEqual(config.dnp3.ai_event_class, "class2")
         self.assertFalse(config.dreams_api.enabled)
         self.assertEqual(config.dreams_api.base_url, "http://127.0.0.1:8090")
         self.assertEqual(config.dreams_api.plant_meter_no, "test-meter")
@@ -37,6 +38,7 @@ sites:
         self.assertEqual(config.enabled_sites()[0].logger_id, "*")
         self.assertEqual(config.enabled_sites()[0].dnp3_address, 7)
         self.assertEqual(config.enabled_sites()[0].dnp3_address_source, "config")
+        self.assertEqual(config.dnp3.ai_event_class, "class2")
 
 
 if __name__ == "__main__":

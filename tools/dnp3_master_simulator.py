@@ -78,6 +78,9 @@ AO_MODES = {
     },
 }
 
+TASK_CALLBACK_REFS: list[Any] = []
+TASK_CALLBACK_REFS_LOCK = threading.Lock()
+
 
 def _print_tx(payload: dict[str, Any]) -> None:
     print(f"[tx] {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}", flush=True)
@@ -136,6 +139,8 @@ class TaskWaiter(opendnp3.ITaskCallback):
 
 def _task_config(name: str) -> tuple[opendnp3.TaskConfig, TaskWaiter]:
     waiter = TaskWaiter(name)
+    with TASK_CALLBACK_REFS_LOCK:
+        TASK_CALLBACK_REFS.append(waiter)
     return opendnp3.TaskConfig.With(waiter), waiter
 
 
@@ -361,6 +366,75 @@ def operate_ao(
         print("[command] timeout waiting for command result", flush=True)
 
 
+def _print_ui_command_status(request_id: str, status: str, **fields: Any) -> None:
+    payload = {"request_id": request_id, "status": status, **fields}
+    print(f"[ui-command] {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}", flush=True)
+
+
+def _run_ui_command(master: Any, payload: dict[str, Any], args: argparse.Namespace | None = None) -> None:
+    request_id = str(payload.get("request_id") or "")
+    command = str(payload.get("command") or "")
+    _print_ui_command_status(request_id, "started", command=command)
+    started = time.time()
+    try:
+        if command == "ao":
+            variation = str(payload.get("variation") or "int16")
+            mode = str(payload.get("mode") or "direct")
+            if variation not in AO_VARIATIONS:
+                raise ValueError(f"Unsupported AO variation: {variation}")
+            if mode not in AO_MODES:
+                raise ValueError(f"Unsupported AO mode: {mode}")
+            operate_ao(
+                master,
+                int(payload["index"]),
+                float(payload["value"]),
+                variation,
+                mode,
+                float(payload.get("wait") or 10),
+                args,
+            )
+        else:
+            raise ValueError(f"Unsupported UI command: {command}")
+    except Exception as exc:
+        _print_ui_command_status(
+            request_id,
+            "error",
+            command=command,
+            error=str(exc),
+            duration_seconds=round(time.time() - started, 3),
+        )
+        return
+    _print_ui_command_status(
+        request_id,
+        "completed",
+        command=command,
+        duration_seconds=round(time.time() - started, 3),
+    )
+
+
+def _start_ui_command_reader(master: Any, args: argparse.Namespace | None = None) -> threading.Event:
+    stop = threading.Event()
+
+    def read_commands() -> None:
+        for raw in sys.stdin:
+            text = raw.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+                if not isinstance(payload, dict):
+                    raise ValueError("UI command payload must be an object")
+                if payload.get("command") in {"quit", "exit"}:
+                    stop.set()
+                    return
+                _run_ui_command(master, payload, args)
+            except Exception as exc:
+                print(f"error: {exc}", flush=True)
+
+    threading.Thread(target=read_commands, name="dnp3-master-ui-command-reader", daemon=True).start()
+    return stop
+
+
 def monitor(
     master: Any,
     interval: int,
@@ -385,9 +459,10 @@ def monitor(
         print(f"[monitor] polling class0 every {interval}s and events every {max(1, min(interval, 5))}s", flush=True)
     else:
         print("[monitor] listening for unsolicited events without polling", flush=True)
+    ui_stop = _start_ui_command_reader(master, args)
     end = None if duration <= 0 else time.time() + duration
     try:
-        while end is None or time.time() < end:
+        while not ui_stop.is_set() and (end is None or time.time() < end):
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("\n[monitor] stopped", flush=True)
@@ -435,6 +510,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--startup-integrity", action="store_true", help="Let the master run its startup integrity scan")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("check", help="Open the DNP3 endpoint and exit after the channel is connected")
     subparsers.add_parser("interactive", help="Open a small command prompt")
 
     scan_parser = subparsers.add_parser("scan", help="Run one class scan")
@@ -475,7 +551,9 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
-        if args.command == "interactive":
+        if args.command == "check":
+            pass
+        elif args.command == "interactive":
             interactive(master)
         elif args.command == "scan":
             scan(master, args.classes, args.wait, args)

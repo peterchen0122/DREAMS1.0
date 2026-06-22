@@ -454,7 +454,7 @@ def send_ui_command(
 
     mqtt_logger_id = site.logger_id if not _is_wildcard(site.logger_id) else target_logger_id
     if _is_wildcard(mqtt_logger_id):
-        raise RuntimeError("A concrete MQTT logger_id is required before sending commands.")
+        raise RuntimeError("送出命令前需要具體的 MQTT logger_id。")
 
     topic = f"{config.mqtt.root_topic}/{mqtt_logger_id}/cmd"
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -477,13 +477,13 @@ def send_ui_command(
         client.connect(config.mqtt.host, config.mqtt.port, config.mqtt.keepalive_seconds)
         client.loop_start()
         if not connected.wait(timeout=5):
-            raise TimeoutError("MQTT connect timed out")
+            raise TimeoutError("MQTT 連線逾時")
         if failed:
-            raise RuntimeError(f"MQTT connect failed: {failed[0]}")
+            raise RuntimeError(f"MQTT 連線失敗：{failed[0]}")
         result = client.publish(topic, body, qos=config.mqtt.qos, retain=False)
         result.wait_for_publish(timeout=5)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            raise RuntimeError(f"MQTT publish failed rc={result.rc}")
+            raise RuntimeError(f"MQTT 發布失敗 rc={result.rc}")
         if command_log is not None:
             command_log.record_published(
                 logger_key=site.key,
@@ -587,7 +587,7 @@ def _make_handler(state: WebUiState) -> type[BaseHTTPRequestHandler]:
                 limit = _query_int(query, "limit", 50, minimum=1, maximum=200)
                 self._send_json(_command_log_payload(state, limit=limit))
             else:
-                self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+                self._send_error(HTTPStatus.NOT_FOUND, "找不到資源")
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
@@ -599,7 +599,7 @@ def _make_handler(state: WebUiState) -> type[BaseHTTPRequestHandler]:
                     token = state.create_session()
                     self._redirect("/", cookie=_session_cookie_header(token))
                 else:
-                    self._send_html(LOGIN_HTML.replace("{{error}}", "Invalid username or password"), status=HTTPStatus.UNAUTHORIZED)
+                    self._send_html(LOGIN_HTML.replace("{{error}}", "帳號或密碼錯誤"), status=HTTPStatus.UNAUTHORIZED)
                 return
             if parsed.path == "/logout":
                 state.clear_session(self._session_token())
@@ -680,7 +680,7 @@ def _make_handler(state: WebUiState) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send_json({"ok": True, **result})
             else:
-                self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+                self._send_error(HTTPStatus.NOT_FOUND, "找不到資源")
 
         def log_message(self, format: str, *args: Any) -> None:
             return
@@ -692,7 +692,7 @@ def _make_handler(state: WebUiState) -> type[BaseHTTPRequestHandler]:
             raw = self.rfile.read(length)
             data = json.loads(raw.decode("utf-8"))
             if not isinstance(data, dict):
-                raise ValueError("JSON body must be an object")
+                raise ValueError("JSON body 必須是物件")
             return data
 
         def _read_form_body(self) -> dict[str, list[str]]:
@@ -710,7 +710,7 @@ def _make_handler(state: WebUiState) -> type[BaseHTTPRequestHandler]:
 
         def _send_auth_required(self, api: bool) -> None:
             if api:
-                self._send_error(HTTPStatus.UNAUTHORIZED, "Authentication required")
+                self._send_error(HTTPStatus.UNAUTHORIZED, "需要登入")
             else:
                 self._redirect("/login")
 
@@ -801,7 +801,7 @@ def _find_enabled_site(config: AppConfig, site_id: str) -> SiteConfig:
     for site in config.enabled_sites():
         if site.key == site_id:
             return site
-    raise KeyError(f"Unknown or disabled logger: {site_id}")
+    raise KeyError(f"未知或停用的 logger：{site_id}")
 
 
 def _find_command_site(config: AppConfig, logger_id: str) -> SiteConfig:
@@ -812,7 +812,7 @@ def _find_command_site(config: AppConfig, logger_id: str) -> SiteConfig:
         topic = MqttTopic(logger_id=logger_id, suffix="cmd")
         if _site_matches_topic(site, topic):
             return site
-    raise KeyError(f"Unknown or disabled MQTT logger: {logger_id}")
+    raise KeyError(f"未知或停用的 MQTT logger：{logger_id}")
 
 
 def _site_payload(site: SiteConfig) -> dict[str, Any]:
@@ -929,16 +929,16 @@ def _validated_dnp3_address(value: Any) -> int:
     try:
         address = int(value)
     except (TypeError, ValueError):
-        raise ValueError("dnp3_address must be an integer")
+        raise ValueError("dnp3_address 必須是整數")
     if address < 0 or address > 65535:
-        raise ValueError("dnp3_address must be between 0 and 65535")
+        raise ValueError("dnp3_address 必須介於 0 到 65535")
     return address
 
 
 def _validate_binding_target(site_id_value: Any, logger_id_value: Any) -> tuple[str, str]:
     logger_id = str(logger_id_value or "").strip()
     if _is_wildcard(logger_id):
-        raise ValueError("A concrete MQTT logger_id is required before binding a DNP3 ID.")
+        raise ValueError("綁定 DNP3 ID 前需要具體的 MQTT logger_id。")
     return "*", logger_id
 
 
@@ -988,11 +988,11 @@ def main() -> None:
 
 
 LOGIN_HTML = r"""<!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DREAMS Outstation Login</title>
+  <title>DREAMS Outstation 登入</title>
   <style>
     :root {
       --bg: #eef2f6;
@@ -1074,17 +1074,17 @@ LOGIN_HTML = r"""<!doctype html>
 </head>
 <body>
   <section class="panel">
-    <h1>DREAMS Outstation Console</h1>
-    <p>Sign in to view status, live values, logs, and manual commands.</p>
+    <h1>DREAMS Outstation 控制台</h1>
+    <p>登入後可查看狀態、即時點值、紀錄與手動命令。</p>
     <form method="post" action="/login">
       <div class="error">{{error}}</div>
-      <label>Username
+      <label>帳號
         <input name="username" autocomplete="username" autofocus>
       </label>
-      <label>Password
+      <label>密碼
         <input name="password" type="password" autocomplete="current-password">
       </label>
-      <button type="submit">Sign In</button>
+      <button type="submit">登入</button>
     </form>
   </section>
 </body>
@@ -1093,11 +1093,11 @@ LOGIN_HTML = r"""<!doctype html>
 
 
 INDEX_HTML = r"""<!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DREAMS Outstation Console</title>
+  <title>DREAMS Outstation 控制台</title>
   <style>
     :root {
       color-scheme: light;
@@ -1612,14 +1612,14 @@ INDEX_HTML = r"""<!doctype html>
   <header>
     <div class="topbar">
       <div>
-        <h1>DREAMS Outstation Console</h1>
-        <div class="subtle mono" id="configPath">Loading configuration...</div>
+        <h1>DREAMS Outstation 控制台</h1>
+        <div class="subtle mono" id="configPath">載入設定中...</div>
       </div>
       <div class="actions">
-        <button id="reloadConfig" title="Reload config.yaml">Reload Config</button>
-        <button id="refresh" class="primary" title="Refresh status">Refresh</button>
+        <button id="reloadConfig" title="重新載入 config.yaml">重新載入設定</button>
+        <button id="refresh" class="primary" title="重新整理狀態">重新整理</button>
         <form method="post" action="/logout">
-          <button type="submit" title="Sign out">Logout</button>
+          <button type="submit" title="登出">登出</button>
         </form>
       </div>
     </div>
@@ -1630,27 +1630,27 @@ INDEX_HTML = r"""<!doctype html>
       <div class="panel metric">
         <div>
           <div class="metric-label">DNP3</div>
-          <div class="metric-value"><span id="dnp3Dot" class="dot"></span><span id="dnp3State">Unknown</span></div>
+          <div class="metric-value"><span id="dnp3Dot" class="dot"></span><span id="dnp3State">未知</span></div>
         </div>
         <div class="metric-detail mono" id="dnp3Detail">-</div>
       </div>
       <div class="panel metric">
         <div>
           <div class="metric-label">MQTT TCP</div>
-          <div class="metric-value"><span id="mqttDot" class="dot"></span><span id="mqttState">Unknown</span></div>
+          <div class="metric-value"><span id="mqttDot" class="dot"></span><span id="mqttState">未知</span></div>
         </div>
         <div class="metric-detail mono" id="mqttDetail">-</div>
       </div>
       <div class="panel metric">
         <div>
-          <div class="metric-label">Service PID</div>
-          <div class="metric-value"><span id="pidDot" class="dot"></span><span id="pidState">Unknown</span></div>
+          <div class="metric-label">服務 PID</div>
+          <div class="metric-value"><span id="pidDot" class="dot"></span><span id="pidState">未知</span></div>
         </div>
         <div class="metric-detail mono" id="pidDetail">-</div>
       </div>
       <div class="panel metric">
         <div>
-          <div class="metric-label">Buffer</div>
+          <div class="metric-label">暫存</div>
           <div class="metric-value"><span id="bufferState">0</span></div>
         </div>
         <div class="metric-detail mono" id="bufferDetail">-</div>
@@ -1661,32 +1661,32 @@ INDEX_HTML = r"""<!doctype html>
       <div class="stack">
         <div class="panel">
           <div class="panel-head">
-            <h2 class="panel-title">Loggers</h2>
-            <span class="pill" id="siteCount">0 loggers</span>
+            <h2 class="panel-title">Logger 清單</h2>
+            <span class="pill" id="siteCount">0 個 logger</span>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Logger</th><th>Binding</th><th>DNP3 ID</th><th>Last MQTT</th><th>Last Type</th><th>Buffer</th><th>Action</th></tr>
+                <tr><th>Logger</th><th>綁定</th><th>DNP3 ID</th><th>最後 MQTT</th><th>最後類型</th><th>暫存</th><th>操作</th></tr>
               </thead>
               <tbody id="siteRows"></tbody>
             </table>
           </div>
-          <div id="loggerActionResult" class="result compact">Saved bindings can be removed from this table.</div>
+          <div id="loggerActionResult" class="result compact">已儲存的綁定可在此表解除。</div>
         </div>
 
         <div class="panel">
           <div class="panel-head">
             <div>
-              <h2 class="panel-title">Live AI Values</h2>
-              <div class="live-meta" id="liveMeta">Waiting for MQTT data...</div>
+              <h2 class="panel-title">即時 AI 點值</h2>
+              <div class="live-meta" id="liveMeta">等待 MQTT 資料...</div>
             </div>
             <select id="liveSite" style="max-width: 190px"></select>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Index</th><th>Name</th><th>Value</th><th>Unit</th><th>DNP Raw</th><th>Updated</th></tr>
+                <tr><th>索引</th><th>名稱</th><th>值</th><th>單位</th><th>DNP Raw</th><th>更新時間</th></tr>
               </thead>
               <tbody id="liveRows"></tbody>
             </table>
@@ -1695,7 +1695,7 @@ INDEX_HTML = r"""<!doctype html>
 
         <div class="panel">
           <div class="panel-head">
-            <h2 class="panel-title">Point Table</h2>
+            <h2 class="panel-title">點表</h2>
             <div class="tabs">
               <button class="tab active" data-tab="ao">AO</button>
               <button class="tab" data-tab="ai">AI</button>
@@ -1704,13 +1704,13 @@ INDEX_HTML = r"""<!doctype html>
           <div class="table-wrap">
             <table id="aoTable">
               <thead>
-                <tr><th>Index</th><th>Name</th><th>Target</th><th>Unit</th><th>Scale</th><th>Feedback AI</th></tr>
+                <tr><th>索引</th><th>名稱</th><th>目標</th><th>單位</th><th>倍率</th><th>回饋 AI</th></tr>
               </thead>
               <tbody id="aoRows"></tbody>
             </table>
             <table id="aiTable" style="display:none">
               <thead>
-                <tr><th>Index</th><th>Name</th><th>Unit</th><th>Scale</th><th>Static</th><th>Event</th><th>Class 2</th></tr>
+                <tr><th>索引</th><th>名稱</th><th>單位</th><th>倍率</th><th>靜態</th><th>事件</th><th>Class 2</th></tr>
               </thead>
               <tbody id="aiRows"></tbody>
             </table>
@@ -1721,7 +1721,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="stack">
         <div class="panel">
           <div class="panel-head">
-            <h2 class="panel-title">Manual AO Command</h2>
+            <h2 class="panel-title">手動 AO 命令</h2>
             <span class="pill">MQTT cmd</span>
           </div>
           <div class="panel-body">
@@ -1729,63 +1729,63 @@ INDEX_HTML = r"""<!doctype html>
               <label>Logger
                 <select id="cmdSite"></select>
               </label>
-              <label>AO Point
+              <label>AO 點位
                 <select id="cmdAo"></select>
               </label>
-              <label>Raw Value
+              <label>Raw 值
                 <input id="cmdRaw" type="number" step="any" value="0">
               </label>
-              <label>Inverter Index
-                <input id="cmdInverter" type="number" min="1" max="50" placeholder="optional">
+              <label>變流器索引
+                <input id="cmdInverter" type="number" min="1" max="50" placeholder="選填">
               </label>
-              <label class="span-2">Preview
+              <label class="span-2">預覽
                 <input id="cmdPreview" class="mono" readonly>
               </label>
             </div>
-            <div id="cmdHelper" class="command-note">Select a logger and AO point to preview command routing.</div>
+            <div id="cmdHelper" class="command-note">選擇 logger 與 AO 點位後，可預覽命令路由。</div>
             <div class="send-row">
-              <button id="sendCommand" class="primary">Send Command</button>
+              <button id="sendCommand" class="primary">送出命令</button>
             </div>
-            <div id="commandResult" class="result">Ready.</div>
+            <div id="commandResult" class="result">就緒。</div>
           </div>
         </div>
 
         <div class="panel">
           <div class="panel-head">
-            <h2 class="panel-title">Command Log</h2>
+            <h2 class="panel-title">命令紀錄</h2>
             <div class="panel-actions">
-              <button id="refreshCommands">Refresh Commands</button>
+              <button id="refreshCommands">重新整理命令</button>
             </div>
           </div>
           <div class="panel-body">
             <div class="toolbar-grid">
-              <label>Status
+              <label>狀態
                 <select id="commandStatusFilter">
-                  <option value="">All</option>
-                  <option value="PUBLISHED">Published</option>
-                  <option value="SUCCESS">Success</option>
-                  <option value="FAILED">Failed</option>
-                  <option value="UNKNOWN_ACK">Unknown ACK</option>
-                  <option value="PUBLISH_FAILED">Publish Failed</option>
-                  <option value="ACK_ERROR">ACK Error</option>
+                  <option value="">全部</option>
+                  <option value="PUBLISHED">已發布</option>
+                  <option value="SUCCESS">成功</option>
+                  <option value="FAILED">失敗</option>
+                  <option value="UNKNOWN_ACK">未知 ACK</option>
+                  <option value="PUBLISH_FAILED">發布失敗</option>
+                  <option value="ACK_ERROR">ACK 錯誤</option>
                 </select>
               </label>
               <label>Logger
                 <input id="commandLoggerFilter" class="mono" placeholder="logger_id">
               </label>
               <label>cmd_id
-                <input id="commandIdFilter" class="mono" placeholder="search cmd_id">
+                <input id="commandIdFilter" class="mono" placeholder="搜尋 cmd_id">
               </label>
-              <button id="clearCommandFilters">Clear</button>
+              <button id="clearCommandFilters">清除</button>
             </div>
           </div>
           <div class="table-wrap command-log-wrap">
             <table>
               <thead>
-                <tr><th>Updated</th><th>Status</th><th>Logger</th><th>DNP3 ID</th><th>AO</th><th>Type</th><th>Target</th><th>Value</th><th>Inv</th><th>Feedback AI</th><th>cmd_id</th><th>Details</th></tr>
+                <tr><th>更新時間</th><th>狀態</th><th>Logger</th><th>DNP3 ID</th><th>AO</th><th>類型</th><th>目標</th><th>值</th><th>Inv</th><th>回饋 AI</th><th>cmd_id</th><th>細節</th></tr>
               </thead>
               <tbody id="commandRows">
-                <tr><td colspan="12" class="subtle">No command yet</td></tr>
+                <tr><td colspan="12" class="subtle">尚無命令</td></tr>
               </tbody>
             </table>
           </div>
@@ -1794,16 +1794,16 @@ INDEX_HTML = r"""<!doctype html>
         <div class="panel">
           <div class="panel-head">
             <h2 class="panel-title">DREAMS API</h2>
-            <span class="pill" id="dreamsApiEnabled">disabled</span>
+            <span class="pill" id="dreamsApiEnabled">停用</span>
           </div>
           <div class="panel-body">
             <div class="flow-steps">
-              <div class="step">1. Fetch DNP3 IDs</div>
-              <div class="step">2. Select Logger</div>
-              <div class="step">3. Save Binding</div>
+              <div class="step">1. 取得 DNP3 ID</div>
+              <div class="step">2. 選擇 Logger</div>
+              <div class="step">3. 儲存綁定</div>
             </div>
             <div class="form-grid">
-              <label>Meter No
+              <label>電號
                 <input id="dreamsApiMeter" class="mono">
               </label>
               <label>Token
@@ -1811,66 +1811,66 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="send-row">
-              <button id="lookupDnp3Ids">Fetch DNP3 IDs</button>
+              <button id="lookupDnp3Ids">取得 DNP3 ID</button>
             </div>
-            <div id="dnp3LookupResult" class="result">Ready.</div>
+            <div id="dnp3LookupResult" class="result">就緒。</div>
             <details class="advanced-box">
-              <summary>Advanced API Settings</summary>
+              <summary>進階 API 設定</summary>
               <div class="form-grid">
                 <label class="span-2">DREAMS Base URL
                   <input id="dreamsApiUrl" class="mono">
                 </label>
-                <label>Apply To Loggers
+                <label>套用至 Logger
                   <input id="dreamsApiApply" readonly>
                 </label>
-                <label>TLS Verify
+                <label>TLS 驗證
                   <input id="dreamsApiTls" readonly>
                 </label>
               </div>
             </details>
-            <div class="section-label">Fetched DNP3 IDs</div>
+            <div class="section-label">已取得的 DNP3 ID</div>
             <div class="table-wrap lookup-table">
               <table>
                 <thead>
                   <tr><th>DNP3 ID</th></tr>
                 </thead>
                 <tbody id="dnp3LookupRows">
-                  <tr><td class="subtle">No lookup yet</td></tr>
+                  <tr><td class="subtle">尚未查詢</td></tr>
                 </tbody>
               </table>
             </div>
-            <div class="section-label">Logger Binding</div>
+            <div class="section-label">Logger 綁定</div>
             <div class="form-grid" style="margin-top:12px">
-              <label>Seen Logger IDs
+              <label>已看到的 Logger ID
                 <select id="bindingSite"></select>
               </label>
               <label>Logger ID
-                <input id="bindingLoggerId" class="mono" placeholder="type logger_id">
+                <input id="bindingLoggerId" class="mono" placeholder="輸入 logger_id">
               </label>
-              <label>Fetched DNP3 ID
+              <label>查詢取得的 DNP3 ID
                 <select id="bindingPlant"></select>
               </label>
               <label>DNP3 ID
-                <input id="bindingDnp3Address" type="number" min="0" max="65535" placeholder="type DNP3 ID">
+                <input id="bindingDnp3Address" type="number" min="0" max="65535" placeholder="輸入 DNP3 ID">
               </label>
-              <label>Activation
-                <input value="auto-applied by Outstation service" readonly>
+              <label>啟用方式
+                <input value="由 Outstation service 自動套用" readonly>
               </label>
             </div>
             <div class="send-row">
-              <button id="saveBinding" class="primary">Save Binding</button>
-              <button id="clearBinding">Clear Binding</button>
+              <button id="saveBinding" class="primary">儲存綁定</button>
+              <button id="clearBinding">清除綁定</button>
             </div>
-            <div id="bindingResult" class="result">Select or type logger_id and DNP3 ID, then save the binding.</div>
+            <div id="bindingResult" class="result">選擇或輸入 logger_id 與 DNP3 ID，然後儲存綁定。</div>
           </div>
         </div>
 
         <div class="panel">
           <div class="panel-head">
-            <h2 class="panel-title">Recent Log</h2>
+            <h2 class="panel-title">近期紀錄</h2>
             <div class="panel-actions">
-              <button id="refreshLogs">Refresh Logs</button>
-              <button id="clearLogView">Clear View</button>
+              <button id="refreshLogs">重新整理紀錄</button>
+              <button id="clearLogView">清除畫面</button>
             </div>
           </div>
           <pre class="log" id="logBox"></pre>
@@ -1924,7 +1924,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       if (response.status === 401) {
         window.location.href = '/login';
-        throw new Error('Authentication required');
+        throw new Error('需要登入');
       }
       const data = await response.json();
       if (!response.ok) {
@@ -1965,16 +1965,16 @@ INDEX_HTML = r"""<!doctype html>
         const baseline = state.logClearBaseline;
         if (baseline == null) {
           state.logClearBaseline = joined;
-          box.textContent = 'Log view cleared. New log lines will appear here.';
+          box.textContent = '紀錄畫面已清除，新紀錄會顯示在這裡。';
         } else if (!joined || joined === baseline) {
-          box.textContent = 'Log view cleared. New log lines will appear here.';
+          box.textContent = '紀錄畫面已清除，新紀錄會顯示在這裡。';
         } else if (baseline && joined.startsWith(`${baseline}\n`)) {
-          box.textContent = joined.slice(baseline.length + 1) || 'Log view cleared. New log lines will appear here.';
+          box.textContent = joined.slice(baseline.length + 1) || '紀錄畫面已清除，新紀錄會顯示在這裡。';
         } else {
           box.textContent = joined;
         }
       } else {
-        box.textContent = joined || 'No log lines.';
+        box.textContent = joined || '目前沒有紀錄。';
       }
       box.scrollTop = box.scrollHeight;
     }
@@ -1983,7 +1983,7 @@ INDEX_HTML = r"""<!doctype html>
       state.logCleared = true;
       state.logClearBaseline = state.logText || null;
       const box = $('logBox');
-      box.textContent = 'Log view cleared. New log lines will appear here.';
+      box.textContent = '紀錄畫面已清除，新紀錄會顯示在這裡。';
       box.scrollTop = 0;
     }
 
@@ -1997,15 +1997,15 @@ INDEX_HTML = r"""<!doctype html>
       text('configPath', data.config_path);
 
       setDot('dnp3Dot', data.dnp3.listening);
-      text('dnp3State', data.dnp3.listening ? 'Service Active' : 'Down');
+      text('dnp3State', data.dnp3.listening ? '服務運行中' : '未啟動');
       text('dnp3Detail', `${data.dnp3.bind}:${data.dnp3.port} master=${data.dnp3.master_address} check=pid`);
 
       setDot('mqttDot', data.mqtt.tcp_reachable);
-      text('mqttState', data.mqtt.tcp_reachable ? 'Reachable' : 'No TCP');
+      text('mqttState', data.mqtt.tcp_reachable ? '可連線' : 'TCP 不通');
       text('mqttDetail', `${data.mqtt.host}:${data.mqtt.port} topic=${data.mqtt.root_topic}/+/+`);
 
       setDot('pidDot', data.service.running, data.service.pid && !data.service.running);
-      text('pidState', data.service.running ? String(data.service.pid) : 'Not running');
+      text('pidState', data.service.running ? String(data.service.pid) : '未執行');
       text('pidDetail', data.service.pid_path);
 
       text('bufferState', data.buffer.total);
@@ -2021,7 +2021,7 @@ INDEX_HTML = r"""<!doctype html>
       const status = config.lookup_status || {};
       const enabled = $('dreamsApiEnabled');
       enabled.className = 'pill ' + (config.enabled ? 'good' : '');
-      enabled.textContent = config.enabled ? 'startup lookup' : 'manual only';
+      enabled.textContent = config.enabled ? '啟動時查詢' : '手動模式';
       const apiInput = state.dreamsApiInput || {};
       if (!document.activeElement || document.activeElement.id !== 'dreamsApiUrl') {
         inputValue('dreamsApiUrl', apiInput.base_url || config.base_url);
@@ -2032,8 +2032,8 @@ INDEX_HTML = r"""<!doctype html>
       if (!document.activeElement || document.activeElement.id !== 'dreamsApiToken') {
         inputValue('dreamsApiToken', apiInput.site_token || config.site_token);
       }
-      inputValue('dreamsApiApply', config.apply_to_sites ? 'yes' : 'no');
-      inputValue('dreamsApiTls', config.verify_tls ? 'yes' : 'no');
+      inputValue('dreamsApiApply', config.apply_to_sites ? '是' : '否');
+      inputValue('dreamsApiTls', config.verify_tls ? '是' : '否');
       if (!state.dnp3Lookup && status.plants && status.plants.length) {
         renderLookupPlants(status.plants);
       } else if (!state.dnp3Lookup && bindings.api_plants && bindings.api_plants.length) {
@@ -2065,7 +2065,7 @@ INDEX_HTML = r"""<!doctype html>
         .filter(site => !((site.key || site.logger_id || site.site_id) === '*' && liveOnly.length))
         .concat(liveOnly);
       const bindingByLogger = new Map((loggerBindings(data).bindings || []).map(binding => [binding.logger_id, binding]));
-      $('siteCount').textContent = `${rows.length} loggers`;
+      $('siteCount').textContent = `${rows.length} 個 logger`;
       $('siteRows').innerHTML = rows.map(site => {
         const key = site.key || site.logger_id || site.site_id;
         const live = liveByLogger.get(site.logger_id || key) || liveByLogger.get(key);
@@ -2078,7 +2078,7 @@ INDEX_HTML = r"""<!doctype html>
         return `
           <tr>
             <td class="mono">${escapeHtml(loggerText)}</td>
-            <td>${bound ? '<span class="pill good">Bound</span>' : '<span class="pill bad">Unbound</span>'} ${sourcePill(binding?.dnp3_address_source || site.dnp3_address_source)}</td>
+            <td>${bound ? '<span class="pill good">已綁定</span>' : '<span class="pill bad">未綁定</span>'} ${sourcePill(binding?.dnp3_address_source || site.dnp3_address_source)}</td>
             <td class="mono">${escapeHtml(dnp3)}</td>
             <td>${escapeHtml(formatTs(lastTs))}</td>
             <td>${lastType === '-' ? '<span class="subtle">-</span>' : `<span class="pill">${escapeHtml(lastType)}</span>`}</td>
@@ -2093,7 +2093,7 @@ INDEX_HTML = r"""<!doctype html>
     function renderCommandLog(commands) {
       const rows = filteredCommands(commands);
       if (!rows.length) {
-        $('commandRows').innerHTML = '<tr><td colspan="12" class="subtle">No matching commands</td></tr>';
+        $('commandRows').innerHTML = '<tr><td colspan="12" class="subtle">沒有符合條件的命令</td></tr>';
         return;
       }
       $('commandRows').innerHTML = rows.map(command => {
@@ -2113,7 +2113,7 @@ INDEX_HTML = r"""<!doctype html>
             <td class="mono">${escapeHtml(command.inverter_index ?? command.ack_payload?.inverter_index ?? '-')}</td>
             <td class="mono">${escapeHtml(feedbackText(command.dnp_values || {}))}</td>
             <td class="mono">${escapeHtml(shortCmdId(command.cmd_id))}</td>
-            <td><button class="small command-detail-toggle" data-cmd-id="${escapeHtml(command.cmd_id)}">${isOpen ? 'Hide' : 'View'}</button></td>
+            <td><button class="small command-detail-toggle" data-cmd-id="${escapeHtml(command.cmd_id)}">${isOpen ? '收合' : '查看'}</button></td>
           </tr>
           ${isOpen ? commandDetailRow(command) : ''}
         `;
@@ -2139,7 +2139,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function commandDetailRow(command) {
       const error = command.error_message
-        ? `<div><strong>Error</strong><pre class="payload-box">${escapeHtml(command.error_message)}</pre></div>`
+        ? `<div><strong>錯誤</strong><pre class="payload-box">${escapeHtml(command.error_message)}</pre></div>`
         : '';
       return `
         <tr class="details-row">
@@ -2147,7 +2147,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="payload-grid">
               <div><strong>MQTT cmd</strong><pre class="payload-box">${escapeHtml(JSON.stringify(command.command_payload || {}, null, 2))}</pre></div>
               <div><strong>cmd_ack</strong><pre class="payload-box">${escapeHtml(JSON.stringify(command.ack_payload || {}, null, 2))}</pre></div>
-              <div><strong>DNP3 feedback</strong><pre class="payload-box">${escapeHtml(JSON.stringify(command.dnp_values || {}, null, 2))}</pre></div>
+              <div><strong>DNP3 回饋</strong><pre class="payload-box">${escapeHtml(JSON.stringify(command.dnp_values || {}, null, 2))}</pre></div>
               ${error}
             </div>
           </td>
@@ -2203,7 +2203,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!canUnbind) return '<span class="subtle">-</span>';
       return `
         <div class="row-actions">
-          <button class="danger unbind-logger" data-logger-id="${escapeHtml(loggerId)}">Unbind</button>
+          <button class="danger unbind-logger" data-logger-id="${escapeHtml(loggerId)}">解除綁定</button>
         </div>
       `;
     }
@@ -2220,7 +2220,15 @@ INDEX_HTML = r"""<!doctype html>
         ? '<span class="pill good">DREAMS API</span>'
         : text === 'database'
           ? '<span class="pill good">SQLite</span>'
-        : `<span class="pill">${escapeHtml(text)}</span>`;
+        : `<span class="pill">${escapeHtml(bindingSourceText(text))}</span>`;
+    }
+
+    function bindingSourceText(source) {
+      const labels = { config: '設定檔', live: '即時', database: 'SQLite', dreams_api: 'DREAMS API' };
+      return String(source || 'config')
+        .split('+')
+        .map(item => labels[item] || item)
+        .join('+');
     }
 
     function fillBindingControls(data) {
@@ -2231,10 +2239,10 @@ INDEX_HTML = r"""<!doctype html>
       siteSelect.innerHTML = targets.length
         ? targets.map(target => {
             const key = bindingSiteKey(target.site_id, target.logger_id);
-            const label = `${target.logger_id} (${target.source})`;
+            const label = `${target.logger_id} (${bindingSourceText(target.source)})`;
             return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`;
           }).join('')
-        : '<option value="">No concrete logger_id seen yet</option>';
+        : '<option value="">尚未看到具體 logger_id</option>';
       if ([...siteSelect.options].some(option => option.value === selectedSite)) {
         siteSelect.value = selectedSite;
       }
@@ -2242,7 +2250,7 @@ INDEX_HTML = r"""<!doctype html>
       const plantSelect = $('bindingPlant');
       const plants = bindingPlantOptions(data);
       const selectedPlant = plantSelect.value;
-      plantSelect.innerHTML = '<option value="">Manual entry</option>' + plants.map(plant => {
+      plantSelect.innerHTML = '<option value="">手動輸入</option>' + plants.map(plant => {
         const key = bindingPlantKey(plant);
         const label = `DNP3 ${plant.dnp3Address}`;
         return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`;
@@ -2369,7 +2377,7 @@ INDEX_HTML = r"""<!doctype html>
         .map(site => ({
           site_id: site.logger_id,
           logger_id: site.logger_id,
-          label: site.logger_id && site.logger_id !== '*' ? site.logger_id : 'waiting for live logger',
+          label: site.logger_id && site.logger_id !== '*' ? site.logger_id : '等待即時 logger',
           dnp3_address: site.dnp3_address
         }));
       setCommandSiteOptions(targets);
@@ -2433,15 +2441,15 @@ INDEX_HTML = r"""<!doctype html>
       }
       const siteId = $('liveSite').value || (data.sites[0] && (data.sites[0].key || data.sites[0].site_id));
       const site = data.sites.find(item => (item.key || item.site_id) === siteId);
-      const mqtt = data.mqtt_connected ? '<span class="pill good">mqtt live</span>' : '<span class="pill bad">mqtt offline</span>';
+      const mqtt = data.mqtt_connected ? '<span class="pill good">MQTT 在線</span>' : '<span class="pill bad">MQTT 離線</span>';
       if (!site) {
-        $('liveMeta').innerHTML = `${mqtt} no site`;
+        $('liveMeta').innerHTML = `${mqtt} 沒有案場`;
         $('liveRows').innerHTML = '';
         return;
       }
-      const seen = site.seen ? '<span class="pill good">data seen</span>' : '<span class="pill bad">no data yet</span>';
-      const online = site.online ? '<span class="pill good">online</span>' : '<span class="pill bad">offline/unknown</span>';
-      $('liveMeta').innerHTML = `${mqtt} ${seen} ${online} <span>last=${escapeHtml(formatTs(site.last_message_ts))}</span>`;
+      const seen = site.seen ? '<span class="pill good">已收到資料</span>' : '<span class="pill bad">尚無資料</span>';
+      const online = site.online ? '<span class="pill good">在線</span>' : '<span class="pill bad">離線/未知</span>';
+      $('liveMeta').innerHTML = `${mqtt} ${seen} ${online} <span>最後=${escapeHtml(formatTs(site.last_message_ts))}</span>`;
       $('liveRows').innerHTML = site.points.map(point => `
         <tr>
           <td class="mono">${escapeHtml(point.key)}</td>
@@ -2465,7 +2473,7 @@ INDEX_HTML = r"""<!doctype html>
       $('aoRows').innerHTML = data.ao.map(point => `
         <tr>
           <td class="mono">AO_${point.index}</td>
-          <td>${escapeHtml(point.name)} ${point.reserved ? '<span class="pill bad">reserved</span>' : ''}</td>
+          <td>${escapeHtml(point.name)} ${point.reserved ? '<span class="pill bad">保留</span>' : ''}</td>
           <td class="mono">${escapeHtml(point.target)}</td>
           <td>${escapeHtml(point.unit)}</td>
           <td>${escapeHtml(point.value_scale)}</td>
@@ -2476,12 +2484,12 @@ INDEX_HTML = r"""<!doctype html>
       $('aiRows').innerHTML = data.ai.map(point => `
         <tr>
           <td class="mono">${escapeHtml(point.key)}</td>
-          <td>${escapeHtml(point.name)} ${point.enabled ? '' : '<span class="pill bad">disabled</span>'}</td>
+          <td>${escapeHtml(point.name)} ${point.enabled ? '' : '<span class="pill bad">停用</span>'}</td>
           <td>${escapeHtml(point.unit)}</td>
           <td>${escapeHtml(point.scale)}</td>
           <td>G30V${escapeHtml(point.static_variation)}</td>
           <td>${point.event_variation == null ? '-' : `G32V${point.event_variation}`}</td>
-          <td>${point.class2_enabled ? 'yes' : 'no'}</td>
+          <td>${point.class2_enabled ? '是' : '否'}</td>
         </tr>
       `).join('');
     }
@@ -2497,14 +2505,14 @@ INDEX_HTML = r"""<!doctype html>
       const logger = option ? option.dataset.logger || option.value : '';
       const dnp3 = option ? option.dataset.dnp3 || dnp3ForLogger(logger) : '';
       const unit = point.unit === '0.01%' ? '%' : point.unit;
-      const feedback = point.feedback_ai == null ? 'no feedback AI' : `AI_${point.feedback_ai}`;
-      const commandKind = point.command_type === 'config_deadband' ? 'Deadband setting' : 'Inverter control';
-      $('cmdPreview').value = `type=${point.command_type}, target=${point.target}, value=${value} ${unit}`;
+      const feedback = point.feedback_ai == null ? '無回饋 AI' : `AI_${point.feedback_ai}`;
+      const commandKind = point.command_type === 'config_deadband' ? 'Deadband 設定' : '變流器控制';
+      $('cmdPreview').value = `類型=${point.command_type}, 目標=${point.target}, 值=${value} ${unit}`;
       $('cmdHelper').innerHTML = `
         <span class="pill">${escapeHtml(commandKind)}</span>
         <span>Logger <span class="mono">${escapeHtml(logger || '-')}</span></span>
         <span>DNP3 <span class="mono">${escapeHtml(dnp3 || '-')}</span></span>
-        <span>Feedback <span class="mono">${escapeHtml(feedback)}</span></span>
+        <span>回饋 <span class="mono">${escapeHtml(feedback)}</span></span>
       `;
     }
 
@@ -2526,7 +2534,7 @@ INDEX_HTML = r"""<!doctype html>
       const result = $('commandResult');
       if (button) button.disabled = true;
       result.className = 'result';
-      result.textContent = 'Sending...';
+      result.textContent = '送出中...';
       try {
         const inverter = $('cmdInverter').value.trim();
         const option = $('cmdSite').selectedOptions[0];
@@ -2539,7 +2547,7 @@ INDEX_HTML = r"""<!doctype html>
         };
         const data = await api('/api/commands', { method: 'POST', body: JSON.stringify(payload) });
         result.className = 'result ok';
-        result.textContent = `Published ${data.topic} cmd_id=${data.payload.cmd_id}`;
+        result.textContent = `已發布 ${data.topic} cmd_id=${data.payload.cmd_id}`;
         refreshCommands().catch(() => {});
       } catch (error) {
         result.className = 'result error';
@@ -2554,7 +2562,7 @@ INDEX_HTML = r"""<!doctype html>
       const result = $('dnp3LookupResult');
       if (button) button.disabled = true;
       result.className = 'result';
-      result.textContent = 'Fetching...';
+      result.textContent = '查詢中...';
       try {
         const data = await api('/api/dnp3-id/lookup', { method: 'POST', body: JSON.stringify(dreamsApiPayload()) });
         state.dnp3Lookup = data;
@@ -2565,8 +2573,8 @@ INDEX_HTML = r"""<!doctype html>
         result.className = 'result ok';
         const count = uniqueDnp3Records(plants).length;
         result.textContent = count
-          ? `Fetched ${count} DNP3 ID record(s). Select a record below and bind it to logger_id.`
-          : 'Fetched 0 DNP3 ID records.';
+          ? `已取得 ${count} 筆 DNP3 ID。請在下方選擇一筆並綁定到 logger_id。`
+          : '已取得 0 筆 DNP3 ID。';
       } catch (error) {
         result.className = 'result error';
         result.textContent = error.message;
@@ -2580,16 +2588,16 @@ INDEX_HTML = r"""<!doctype html>
       const result = $('bindingResult');
       button.disabled = true;
       result.className = 'result';
-      result.textContent = 'Saving...';
+      result.textContent = '儲存中...';
       try {
         const selected = splitBindingSiteKey($('bindingSite').value);
         const loggerId = $('bindingLoggerId').value.trim() || selected.logger_id;
         const dnp3AddressText = $('bindingDnp3Address').value.trim();
         if (!loggerId) {
-          throw new Error('logger_id is required.');
+          throw new Error('需要 logger_id。');
         }
         if (!dnp3AddressText) {
-          throw new Error('DNP3 ID is required.');
+          throw new Error('需要 DNP3 ID。');
         }
         const payload = {
           site_id: '*',
@@ -2601,9 +2609,9 @@ INDEX_HTML = r"""<!doctype html>
         renderStatus(data.status);
         result.className = 'result ok';
         const activation = data.auto_reload
-          ? ' Outstation will reload the DNP3 gateway automatically within a few seconds.'
-          : ' Start the Outstation service to activate this DNP3 ID.';
-        result.textContent = `Saved binding ${payload.logger_id} -> DNP3 ${payload.dnp3_address}.${activation}`;
+          ? ' Outstation 會在數秒內自動重載 DNP3 gateway。'
+          : ' 請啟動 Outstation service 以套用此 DNP3 ID。';
+        result.textContent = `已儲存綁定 ${payload.logger_id} -> DNP3 ${payload.dnp3_address}.${activation}`;
       } catch (error) {
         result.className = 'result error';
         result.textContent = error.message;
@@ -2623,12 +2631,12 @@ INDEX_HTML = r"""<!doctype html>
     async function clearLoggerBinding(loggerId, result, button = null) {
       if (!loggerId) {
         result.className = 'result error';
-        result.textContent = 'logger_id is required.';
+        result.textContent = '需要 logger_id。';
         return;
       }
       if (button) button.disabled = true;
       result.className = 'result';
-      result.textContent = 'Clearing...';
+      result.textContent = '清除中...';
       try {
         const data = await api('/api/bindings/clear', {
           method: 'POST',
@@ -2638,9 +2646,9 @@ INDEX_HTML = r"""<!doctype html>
         renderStatus(data.status);
         result.className = 'result ok';
         const activation = data.auto_reload
-          ? ' Outstation will reload the DNP3 gateway automatically within a few seconds.'
-          : ' Start the Outstation service to activate this change.';
-        result.textContent = `Cleared binding ${loggerId}.${activation}`;
+          ? ' Outstation 會在數秒內自動重載 DNP3 gateway。'
+          : ' 請啟動 Outstation service 以套用此變更。';
+        result.textContent = `已清除綁定 ${loggerId}.${activation}`;
       } catch (error) {
         result.className = 'result error';
         result.textContent = error.message;
@@ -2652,7 +2660,7 @@ INDEX_HTML = r"""<!doctype html>
     function renderLookupPlants(plants) {
       const records = uniqueDnp3Records(plants);
       if (!records.length) {
-        $('dnp3LookupRows').innerHTML = '<tr><td class="subtle">No DNP3 IDs returned</td></tr>';
+        $('dnp3LookupRows').innerHTML = '<tr><td class="subtle">沒有回傳 DNP3 ID</td></tr>';
         return;
       }
       $('dnp3LookupRows').innerHTML = records.map(plant => `

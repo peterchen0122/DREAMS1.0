@@ -47,13 +47,23 @@ class SiteState:
             self.online = True
             return changed
 
-    def apply_status(self, payload: dict[str, Any]) -> None:
-        status = str(payload.get("status", "")).lower()
+    def apply_status(self, payload: dict[str, Any]) -> bool | None:
+        raw_status = payload.get("status")
+        if raw_status is None:
+            raw_status = payload.get("online")
+        if raw_status is None:
+            raw_status = payload.get("state")
+        status = str(raw_status).lower()
+        ts = int(payload.get("ts") or time.time())
         with self._lock:
-            if status == "online":
+            if status in {"online", "up", "connected", "1", "true"}:
                 self.online = True
-            elif status == "offline":
+            elif status in {"offline", "down", "disconnected", "0", "false"}:
                 self.online = False
+            else:
+                return None
+            self._values[32] = ts
+            return self.online
 
     def update_ai(self, index: int, value: float) -> None:
         if index not in AI_POINTS:
