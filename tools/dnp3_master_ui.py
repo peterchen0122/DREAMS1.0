@@ -35,6 +35,7 @@ MEASUREMENT_LINE = re.compile(r"^\[(\d+)\]\s*:\s*([^:]+)\s*:\s*([^:]+)\s*:\s*(.*
 TRANSMISSION_LINE = re.compile(r"^\[tx\]\s*(\{.*\})$")
 COMMAND_RESULT_LINE = re.compile(r"^\[command\]\s+summary=([A-Z0-9_]+)(?:\s+results=(\d+))?")
 COMMAND_TIMEOUT_LINE = re.compile(r"^\[command\]\s+timeout waiting for command result$")
+TASK_RESULT_LINE = re.compile(r"^\[task\]\s+.+completed:\s+([A-Z0-9_]+)")
 UI_COMMAND_LINE = re.compile(r"^\[ui-command\]\s*(\{.*\})$")
 OPERATION_LOCK = threading.Lock()
 
@@ -234,6 +235,10 @@ def _parse_command_result(output: str) -> dict[str, Any] | None:
             }
         if COMMAND_TIMEOUT_LINE.match(text):
             return {"summary": "TIMEOUT", "results": None, "success": False}
+        match = TASK_RESULT_LINE.match(text)
+        if match:
+            summary = match.group(1)
+            return {"summary": summary, "results": None, "success": summary == "SUCCESS"}
     return None
 
 
@@ -483,6 +488,8 @@ def _run_multi_poll(
             )
             result["dnp3_address"] = address
             result["logger_id"] = logger_by_address.get(address, "")
+            command_result = result.get("command_result")
+            result["success"] = bool(command_result.get("success")) if isinstance(command_result, dict) else int(result.get("returncode", 1)) == 0
             results.append(result)
             transmissions.extend(result.get("transmission") or [])
     finally:
@@ -491,7 +498,7 @@ def _run_multi_poll(
     stdout = "\n".join(_target_output(result, "stdout") for result in results if result.get("stdout")).strip()
     stderr = "\n".join(_target_output(result, "stderr") for result in results if result.get("stderr")).strip()
     returncodes = [int(result.get("returncode", 1)) for result in results]
-    returncode = next((code for code in returncodes if code != 0), 0 if returncodes else 1)
+    returncode = next((code for code in returncodes if code != 0), 0 if results and all(result.get("success") for result in results) else 1)
     return {
         "returncode": returncode,
         "stdout": stdout,
@@ -1552,12 +1559,12 @@ INDEX_HTML = r"""<!doctype html>
 			            </label>
 			            <label>狀態
 				              <select id="machineStatusFilter">
-					                <option value="all">全部</option>
-					                <option value="running">監控中</option>
-					                <option value="down">離線</option>
-				                <option value="unknown">未知</option>
-				                <option value="data">有資料</option>
-				              </select>
+						                <option value="all">全部</option>
+						                <option value="online">在線</option>
+						                <option value="down">離線</option>
+					                <option value="unknown">未知</option>
+					                <option value="data">有資料</option>
+					              </select>
 				            </label>
 			          </div>
 			          <div class="machine-actions">
@@ -1574,7 +1581,7 @@ INDEX_HTML = r"""<!doctype html>
 			          </div>
 				          <div class="machine-status-strip">
 				            <div id="machineFilterResult" class="result-line machine-status-line"></div>
-				            <div id="machineStatusCounts" class="result-line machine-status-line">狀態 監控中 0 / 離線 0 / 未知 0</div>
+					            <div id="machineStatusCounts" class="result-line machine-status-line">狀態 在線 0 / 離線 0 / 未知 0</div>
 				            <div id="monitorTargets" class="result-line machine-status-line">監控目標 0 個 DNP3 ID</div>
 				            <div id="pollTargets" class="result-line machine-status-line">輪詢目標 0 個 DNP3 ID</div>
 				          </div>
@@ -1736,9 +1743,10 @@ INDEX_HTML = r"""<!doctype html>
 		      monitorSelectedAddresses: new Set(),
 		      knownMonitorAddresses: new Set(),
 		      monitorSelectionInitialized: false,
-		      runningAddresses: [],
+	      runningAddresses: [],
 	      monitorDetails: [],
 	      machinePoints: {},
+	      machinePollResults: {},
 	      machineLinkTimes: {},
 	      selectedMachineAddress: null,
 	      machineFilterText: '',
@@ -1900,6 +1908,13 @@ INDEX_HTML = r"""<!doctype html>
 	      times.offline_at = '';
 	    }
 
+	    function rememberMachineOffline(address, timestamp = localTimestamp()) {
+	      const times = ensureMachineLinkTimes(address);
+	      if (!times.offline_at) {
+	        times.offline_at = timestamp;
+	      }
+	    }
+
 	    function rememberMonitorLinkTimes(monitors = state.monitorDetails || []) {
 	      const now = localTimestamp();
 	      for (const monitor of monitors || []) {
@@ -1909,12 +1924,7 @@ INDEX_HTML = r"""<!doctype html>
 	        const onlineAt = formatEpochSeconds(monitor.started_at);
 	        const offlineAt = formatEpochSeconds(monitor.stopped_at);
 	        const running = Boolean(monitor.running);
-	        if (running) {
-	          if (!times.online_at || !times.last_running) {
-	            times.online_at = onlineAt || now;
-	          }
-	          times.offline_at = '';
-	        } else if (monitor.returncode !== null && monitor.returncode !== undefined) {
+	        if (!running && monitor.returncode !== null && monitor.returncode !== undefined) {
 	          if (!times.online_at && onlineAt) times.online_at = onlineAt;
 	          if (!times.offline_at) times.offline_at = offlineAt || now;
 	        }
@@ -1957,13 +1967,46 @@ INDEX_HTML = r"""<!doctype html>
 	      }
 	    }
 
+	    function commandSucceeded(result) {
+	      const command = result?.command_result || null;
+	      if (command) return Boolean(command.success);
+	      return Number(result?.returncode) === 0;
+	    }
+
+	    function commandSummary(result) {
+	      return result?.command_result?.summary || (Number(result?.returncode) === 0 ? 'SUCCESS' : 'ERROR');
+	    }
+
+	    function rememberMachinePollResults(results) {
+	      const timestamp = localTimestamp();
+	      for (const result of results || []) {
+	        const address = Number(result.dnp3_address ?? result.outstation_address);
+	        if (!Number.isFinite(address)) continue;
+	        const success = commandSucceeded(result);
+	        state.machinePollResults[String(address)] = {
+	          success,
+	          summary: commandSummary(result),
+	          checked_at: timestamp,
+	          logger_id: result.logger_id || ''
+	        };
+	        if (success) rememberMachineOnline(address, timestamp);
+	        else rememberMachineOffline(address, timestamp);
+	      }
+	    }
+
 	    function machineStatus(address) {
 	      const monitor = (state.monitorDetails || []).find(item => Number(item.dnp3_address) === Number(address));
-	      if (monitor?.running) return { key: 'running', label: '監控中', kind: 'ok' };
-	      if (monitor?.stopped_by_user) return { key: 'unknown', label: '未知', kind: 'warn' };
+	      const poll = state.machinePollResults[String(address)] || null;
+	      const snapshot = state.machinePoints[String(address)] || null;
+	      if (poll) {
+	        if (poll.success) return { key: 'online', label: '在線', kind: 'ok', detail: poll.summary };
+	        return { key: 'down', label: '離線', kind: 'err', detail: poll.summary };
+	      }
 	      if (monitor && monitor.returncode !== null && monitor.returncode !== undefined && monitor.returncode !== 0) {
 	        return { key: 'down', label: '離線', kind: 'err' };
 	      }
+	      if (snapshot && Object.keys(snapshot.points || {}).length) return { key: 'online', label: '在線', kind: 'ok' };
+	      if (monitor?.stopped_by_user) return { key: 'unknown', label: '未知', kind: 'warn' };
 	      return { key: 'unknown', label: '未知', kind: 'warn' };
 	    }
 
@@ -2031,15 +2074,15 @@ INDEX_HTML = r"""<!doctype html>
 	    }
 
 	    function updateMachineStatusCounts(views) {
-	      const counts = { running: 0, down: 0, unknown: 0 };
+	      const counts = { online: 0, down: 0, unknown: 0 };
 	      for (const view of views || []) {
 	        if (Object.prototype.hasOwnProperty.call(counts, view.status.key)) {
 	          counts[view.status.key] += 1;
 	        }
 	      }
-	      const text = `狀態 監控中 ${counts.running} / 離線 ${counts.down} / 未知 ${counts.unknown}`;
+	      const text = `狀態 在線 ${counts.online} / 離線 ${counts.down} / 未知 ${counts.unknown}`;
 	      $('machineStatusCounts').textContent = text;
-	      $('machineStatusCounts').title = `監控中 ${counts.running} 台，離線 ${counts.down} 台，未知 ${counts.unknown} 台`;
+	      $('machineStatusCounts').title = `在線 ${counts.online} 台，離線 ${counts.down} 台，未知 ${counts.unknown} 台`;
 	    }
 
 	    function renderMachineStatus() {
@@ -2643,32 +2686,35 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function readAi() {
-      setBusy(true);
-      $('pollResult').textContent = '';
-      try {
-        const data = await api('/api/range', { ...selectedAddressPayload(), start: 0, stop: 32 });
-        renderAi(data.points || []);
-        renderTransmission(data.transmission || []);
-        appendConsole(`讀取 AI_0..AI_32（${pollTargetText(data)}）`, data);
-        $('pollResult').textContent = data.returncode === 0 ? `AI 掃描完成：${pollTargetText(data)}` : 'AI 掃描回傳錯誤';
-        setStatus(data.returncode === 0 ? '上次掃描正常' : '掃描錯誤', data.returncode === 0 ? 'ok' : 'err');
-      } catch (error) {
-        $('pollResult').textContent = error.message;
-        setStatus('錯誤', 'err');
+	    async function readAi() {
+	      setBusy(true);
+	      $('pollResult').textContent = '';
+	      try {
+	        const data = await api('/api/range', { ...selectedAddressPayload(), start: 0, stop: 32 });
+	        rememberMachinePollResults(data.results || []);
+	        renderAi(data.points || []);
+	        renderTransmission(data.transmission || []);
+	        appendConsole(`讀取 AI_0..AI_32（${pollTargetText(data)}）`, data);
+	        $('pollResult').textContent = data.returncode === 0 ? `AI 掃描完成：${pollTargetText(data)}` : 'AI 掃描回傳錯誤';
+	        setStatus(data.returncode === 0 ? '上次掃描正常' : '掃描錯誤', data.returncode === 0 ? 'ok' : 'err');
+	      } catch (error) {
+	        $('pollResult').textContent = error.message;
+	        setStatus('錯誤', 'err');
       } finally {
         setBusy(false);
       }
     }
 
-    async function scanEvents() {
-      setBusy(true);
-      $('pollResult').textContent = '';
-      try {
-        const data = await api('/api/scan', { ...selectedAddressPayload(), classes: 'events' });
-        renderTransmission(data.transmission || []);
-        appendConsole(`掃描事件（${pollTargetText(data)}）`, data);
-        $('pollResult').textContent = data.returncode === 0 ? `事件掃描完成：${pollTargetText(data)}` : '事件掃描回傳錯誤';
+	    async function scanEvents() {
+	      setBusy(true);
+	      $('pollResult').textContent = '';
+	      try {
+	        const data = await api('/api/scan', { ...selectedAddressPayload(), classes: 'events' });
+	        rememberMachinePollResults(data.results || []);
+	        renderMachineStatus();
+	        renderTransmission(data.transmission || []);
+	        appendConsole(`掃描事件（${pollTargetText(data)}）`, data);
+	        $('pollResult').textContent = data.returncode === 0 ? `事件掃描完成：${pollTargetText(data)}` : '事件掃描回傳錯誤';
         setStatus(data.returncode === 0 ? '上次掃描正常' : '掃描錯誤', data.returncode === 0 ? 'ok' : 'err');
       } catch (error) {
         $('pollResult').textContent = error.message;

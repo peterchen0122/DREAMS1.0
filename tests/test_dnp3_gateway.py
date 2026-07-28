@@ -92,8 +92,18 @@ class Dnp3GatewayTests(unittest.TestCase):
         self.assertEqual(stack_config.dbConfig.analog[7].clazz, _FakeOpenDnp3.PointClass.Class2)
         self.assertEqual(
             stack_config.outstation.params.unsolRetryTimeout,
-            ("seconds", config.dnp3.application_confirm_timeout_seconds),
+                ("seconds", config.dnp3.application_confirm_timeout_seconds),
         )
+
+    def test_endpoint_keepalive_uses_internal_non_conflicting_address(self):
+        config = load_config("config/config.yaml")
+        gateway = Pydnp3Gateway(config, None, _FakeAsiodnp3, _FakeOpenDnp3, _FakeOpenPal)
+
+        keepalive = gateway._endpoint_keepalive_site()
+
+        self.assertEqual(keepalive.dnp3_address_source, "internal")
+        self.assertNotIn(keepalive.dnp3_address, {site.dnp3_address for site in config.enabled_sites()})
+        self.assertNotEqual(keepalive.dnp3_address, config.dnp3.master_address)
 
 
 if __name__ == "__main__":

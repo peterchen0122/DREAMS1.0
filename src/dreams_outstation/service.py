@@ -94,17 +94,31 @@ class DreamsOutstationService:
             state = self.states[logger_key]
             if suffix == "snapshot":
                 changed = state.apply_snapshot(payload)
-                self.dnp3.set_site_online(logger_key, True)
-                LOGGER.info("Snapshot received logger=%s key=%s changed=%s", topic.logger_id, logger_key, len(changed))
+                if state.online:
+                    self.dnp3.set_site_online(logger_key, True)
+                LOGGER.info(
+                    "Snapshot received logger=%s key=%s changed=%s online=%s",
+                    topic.logger_id,
+                    logger_key,
+                    len(changed),
+                    state.online,
+                )
                 reason = str(payload.get("reason", "")).lower()
-                if reason in {"startup", "periodic"}:
+                if state.online and reason in {"startup", "periodic"}:
                     self.send_periodic_snapshot(logger_key)
             elif suffix == "event":
                 changed = state.apply_event(payload)
-                self.dnp3.set_site_online(logger_key, True)
                 dnp_values = state.dnp_values_for_changed(changed)
-                LOGGER.info("Deadband event received logger=%s key=%s points=%s", topic.logger_id, logger_key, sorted(dnp_values))
-                if dnp_values:
+                if state.online:
+                    self.dnp3.set_site_online(logger_key, True)
+                LOGGER.info(
+                    "Deadband event received logger=%s key=%s points=%s online=%s",
+                    topic.logger_id,
+                    logger_key,
+                    sorted(dnp_values),
+                    state.online,
+                )
+                if state.online and dnp_values:
                     self._send_or_buffer(logger_key, dnp_values, CLASS2_DEADBAND, "event", payload, periodic=False)
             elif suffix == "cmd_ack":
                 self.handle_command_ack(logger_key, payload, logger_id=topic.logger_id)
@@ -209,7 +223,7 @@ class DreamsOutstationService:
                 return
             ao = AO_POINTS[ao_index]
             if ao.feedback_ai is not None:
-                state.update_ai(ao.feedback_ai, ao.engineering_value(raw_value))
+                state.update_ai(ao.feedback_ai, raw_value)
             feedback = state.snapshot_dnp()
             points = {18: feedback[18], 19: feedback[19]}
             if ao.feedback_ai is not None and ao.feedback_ai in feedback:
@@ -241,7 +255,7 @@ class DreamsOutstationService:
             payload = {
                 "ts": int(time.time()),
                 "reason": "periodic_outstation",
-                "data": state.snapshot_engineering(),
+                "data": state.snapshot_raw(),
             }
             self._send_or_buffer(site_id, dnp_values, CLASS1_PERIODIC, "snapshot", payload, periodic=True)
 

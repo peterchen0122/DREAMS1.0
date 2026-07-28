@@ -10,6 +10,7 @@ from .points import AI_POINTS, AO_POINTS, enabled_ai_points
 LOGGER = logging.getLogger(__name__)
 
 AoCommandCallback = Callable[[str, int, float], bool]
+ENDPOINT_KEEPALIVE_SITE_ID = "__dnp3_endpoint_keepalive__"
 
 
 class Dnp3Gateway(Protocol):
@@ -96,17 +97,10 @@ class Pydnp3Gateway:
         )
 
         for site in self.config.enabled_sites():
-            stack_config = self._build_stack_config(site)
-            app = _make_outstation_application(self.opendnp3)
-            handler = _make_command_handler(self.opendnp3, site.key, self._handle_ao_command)
-            outstation = self.channel.AddOutstation(f"site-{site.key}", handler, app, stack_config)
-            outstation.Enable()
-            self._set_restart_iin(outstation, site.key)
-            self.outstation_apps[site.key] = app
-            self.command_handlers[site.key] = handler
-            self.outstations[site.key] = outstation
-            self.site_online[site.key] = True
-            LOGGER.info("DNP3 outstation enabled logger=%s address=%s", site.key, site.dnp3_address)
+            self._add_outstation(site, "logger")
+
+        keepalive_site = self._endpoint_keepalive_site()
+        self._add_outstation(keepalive_site, "endpoint keepalive")
 
         self.available = True
         LOGGER.info("DNP3 TCP server listening on %s:%s", self.config.dnp3.bind, self.config.dnp3.port)
@@ -159,6 +153,34 @@ class Pydnp3Gateway:
         self.site_online[site_id] = online
         LOGGER.info("DNP3 outstation %s logger=%s", "enabled" if online else "disabled", site_id)
 
+    def _add_outstation(self, site: SiteConfig, role: str):
+        stack_config = self._build_stack_config(site)
+        app = _make_outstation_application(self.opendnp3)
+        handler = _make_command_handler(self.opendnp3, site.key, self._handle_ao_command)
+        outstation = self.channel.AddOutstation(f"site-{site.key}", handler, app, stack_config)
+        outstation.Enable()
+        self._set_restart_iin(outstation, site.key)
+        self.outstation_apps[site.key] = app
+        self.command_handlers[site.key] = handler
+        self.outstations[site.key] = outstation
+        self.site_online[site.key] = True
+        LOGGER.info("DNP3 %s outstation enabled logger=%s address=%s", role, site.key, site.dnp3_address)
+        return outstation
+
+    def _endpoint_keepalive_site(self) -> SiteConfig:
+        used_addresses = {site.dnp3_address for site in self.config.enabled_sites()}
+        used_addresses.add(self.config.dnp3.master_address)
+        for address in range(65534, 0, -1):
+            if address not in used_addresses:
+                return SiteConfig(
+                    site_id=ENDPOINT_KEEPALIVE_SITE_ID,
+                    logger_id=ENDPOINT_KEEPALIVE_SITE_ID,
+                    dnp3_address=address,
+                    enabled=True,
+                    dnp3_address_source="internal",
+                )
+        raise RuntimeError("No free DNP3 address available for endpoint keepalive")
+
     def _build_stack_config(self, site: SiteConfig):
         max_index = max(enabled_ai_points(self.config.dnp3.include_spare_point_31).keys())
         stack_config = self.asiodnp3.OutstationStackConfig(self.opendnp3.DatabaseSizes.AllTypes(max_index + 1))
@@ -204,6 +226,8 @@ class Pydnp3Gateway:
         return self.opendnp3.StaticAnalogVariation.Group30Var3
 
     def _handle_ao_command(self, site_id: str, ao_index: int, value: float) -> bool:
+        if site_id == ENDPOINT_KEEPALIVE_SITE_ID:
+            return False
         if self.command_callback is None:
             return False
         return self.command_callback(site_id, ao_index, value)

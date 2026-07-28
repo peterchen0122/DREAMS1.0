@@ -126,15 +126,20 @@ class WebUiTests(unittest.TestCase):
 
         monitor.apply_mqtt_message(
             "DREAMS/logger_test00/snapshot",
-            {"ts": 123, "data": {"AI_7": 1250, "AI_10": 60}},
+            {"ts": 123, "data": {"AI_4": 38010, "AI_7": 1250, "AI_10": 600}},
         )
         payload = monitor.snapshot()
         site = next(row for row in payload["sites"] if row["logger_id"] == "logger_test00")
+        voltage = next(point for point in site["points"] if point["index"] == 4)
         active_power = next(point for point in site["points"] if point["index"] == 7)
 
         self.assertTrue(site["seen"])
         self.assertEqual(site["actual_logger_id"], "logger_test00")
         self.assertEqual(site["last_snapshot_ts"], 123)
+        self.assertEqual(voltage["raw_value"], 38010)
+        self.assertEqual(voltage["value"], 38010)
+        self.assertEqual(voltage["engineering_value"], 380.1)
+        self.assertEqual(voltage["dnp_value"], 38010)
         self.assertEqual(active_power["value"], 1250)
         self.assertEqual(active_power["dnp_value"], 1250)
 

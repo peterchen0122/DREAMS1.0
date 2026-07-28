@@ -119,9 +119,9 @@ DREAMS/+/+
 
 數值規則：
 
-- `data` 內 AI 值請送工程值，不要送 DNP3 raw value。
-- Outstation 會依 AI 點表自動轉成 DNP3 raw value。
-- 例如 `AI_4 = 380.1` 代表 380.1 V，Outstation 會轉成 DNP raw `38010`。
+- `data` 內 AI 值請送 DNP3 raw value。
+- Outstation 會直接把 MQTT 收到的 raw 值寫入對應 AI 點，不再依 scale 二次換算。
+- 工程值只用於 UI 顯示：例如 `AI_4 = 38010` 代表 380.10 V，送給 Master 的 DNP raw 仍是 `38010`。
 
 ## 7. Snapshot
 
@@ -135,7 +135,7 @@ DREAMS/{logger_id}/snapshot
 
 - 回報完整目前點值。
 - PV Logger 啟動、重連或 15 分鐘週期資料應使用 `snapshot`。
-- Outstation 收到 `reason=startup` 或 `reason=periodic` 時，會立即轉成 DNP3 periodic snapshot event。
+- Outstation 收到 `reason=startup` 或 `reason=periodic` 時，若該 logger 未被 `status=offline` 鎖定，會立即轉成 DNP3 periodic snapshot event。
 
 建議發送時機：
 
@@ -151,37 +151,37 @@ Payload 範例：
   "ts": 1779955200,
   "reason": "periodic",
   "data": {
-    "AI_0": 144.0,
-    "AI_1": 144.0,
-    "AI_2": 144.0,
-    "AI_3": 0.0,
-    "AI_4": 23000.0,
-    "AI_5": 23000.0,
-    "AI_6": 23000.0,
+    "AI_0": 1440,
+    "AI_1": 1440,
+    "AI_2": 1440,
+    "AI_3": 0,
+    "AI_4": 23000,
+    "AI_5": 23000,
+    "AI_6": 23000,
     "AI_7": 52000,
     "AI_8": 1200,
-    "AI_9": 99.5,
-    "AI_10": 60.0,
+    "AI_9": 100,
+    "AI_10": 600,
     "AI_11": 2147480000,
     "AI_12": 850,
-    "AI_13": 2.1,
+    "AI_13": 2,
     "AI_14": 100,
     "AI_15": 100,
     "AI_16": 0,
     "AI_17": 105,
     "AI_18": 0,
     "AI_19": 0,
-    "AI_20": 0.5,
-    "AI_21": 0.5,
-    "AI_22": 0.5,
-    "AI_23": 0.5,
-    "AI_24": 0.5,
-    "AI_25": 0.5,
-    "AI_26": 0.5,
-    "AI_27": 1.0,
-    "AI_28": 1.0,
-    "AI_29": 1.0,
-    "AI_30": 0.5
+    "AI_20": 50,
+    "AI_21": 50,
+    "AI_22": 50,
+    "AI_23": 50,
+    "AI_24": 50,
+    "AI_25": 50,
+    "AI_26": 50,
+    "AI_27": 100,
+    "AI_28": 100,
+    "AI_29": 100,
+    "AI_30": 50
   }
 }
 ```
@@ -263,7 +263,7 @@ Payload 範例：
 | `offline` | Logger 離線 |
 
 其他欄位如 `firmware`、`ip`、`rssi`、`message` 可作為診斷資訊，Outstation 目前只用 `status` 判斷 online/offline。
-收到 `status=offline` 時，Outstation 會更新該 logger 的 UI 狀態、停止該 logger 的週期快照送出，並停用該 logger 對應的 DNP3 ID，讓 Master 對該 ID 的 poll / keep alive 無回應並判定離線；收到 `status=online`、`snapshot` 或 `event` 後會恢復該 logger 的在線資料狀態與 DNP3 ID 回應。TCP server 是否可連只代表 Outstation service 是否活著，不代表每一台機器在線。若資料蒐集器斷電無法主動發布 offline，PV Logger / broker 必須用 MQTT Last Will 或雲端監控機制代送 `status=offline`。
+收到 `status=offline` 時，Outstation 會更新該 logger 的 UI 狀態、停止該 logger 的週期快照與 event 送出，並停用該 logger 對應的 DNP3 ID，讓 Master 對該 ID 的 poll / keep alive 無回應並判定離線。離線後若又收到 `snapshot` 或 `event`，Outstation 只更新暫存點值與最後接收時間，不會恢復 DNP3 ID 回應；必須收到明確的 `status=online` 才會解除離線鎖定。TCP server 是否可連只代表 Outstation service 是否活著，不代表每一台機器在線；Outstation 會保留一個內部 DNP3 endpoint keepalive outstation 維持 TCP listener，不作為 logger 綁定或驗證 ID 使用。若資料蒐集器斷電無法主動發布 offline，PV Logger / broker 必須用 MQTT Last Will 或雲端監控機制代送 `status=offline`。
 
 ## 10. Command
 
@@ -648,43 +648,43 @@ value = raw_value * 0.01
 
 ## 13. AI 點表
 
-PV Logger 在 `snapshot` / `event` 的 `data` 內使用 `AI_x` 作為 key。Payload 值請送工程值，Outstation 會依 scale 轉成 DNP raw。
+PV Logger 在 `snapshot` / `event` 的 `data` 內使用 `AI_x` 作為 key。Payload 值請送 DNP raw；工程值顯示為 `raw / scale`。
 
-| AI | 名稱 | Payload 工程值 | DNP raw scale | Event 可用 |
+| AI | 名稱 | MQTT / DNP Raw 單位 | 工程顯示換算 | Event 可用 |
 | --- | --- | --- | --- | --- |
-| AI_0 | Line Current Phase A | A | x10 | 是 |
-| AI_1 | Line Current Phase B | A | x10 | 是 |
-| AI_2 | Line Current Phase C | A | x10 | 是 |
-| AI_3 | Line Current Phase N | A | x10 | 是 |
-| AI_4 | Line Voltage Phase AB | V | x100 | 是 |
-| AI_5 | Line Voltage Phase BC | V | x100 | 是 |
-| AI_6 | Line Voltage Phase AC | V | x100 | 是 |
-| AI_7 | Active Power | W | x1 | 是 |
-| AI_8 | Reactive Power | Var | x1 | 是 |
-| AI_9 | Power Factor | % | x1 | 是 |
-| AI_10 | Frequency | Hz | x10 | 是 |
-| AI_11 | Accumulated Energy | Wh | x1 | 否，snapshot only |
-| AI_12 | Irradiance | W/m2 | x1 | 否，snapshot only |
-| AI_13 | Wind Speed | m/s | x1 | 否，snapshot only |
-| AI_14 | Inverter PF Setpoint | % | x1 | 是 |
-| AI_15 | Inverter Active Power Setpoint | % | x1 | 是 |
-| AI_16 | Inverter Reactive Power Setpoint | % | x1 | 是 |
-| AI_17 | Inverter Vpset | integer | x1 | 是 |
-| AI_18 | Inverter 1-25 Control Success Bitmask | 25-bit integer | x1 | 由 `cmd_ack` 產生 |
-| AI_19 | Inverter 26-50 Control Success Bitmask | 25-bit integer | x1 | 由 `cmd_ack` 產生 |
-| AI_20 | Line Current Phase A Dead Band Setting | % | x100 | 是 |
-| AI_21 | Line Current Phase B Dead Band Setting | % | x100 | 是 |
-| AI_22 | Line Current Phase C Dead Band Setting | % | x100 | 是 |
-| AI_23 | Line Current Phase N Dead Band Setting | % | x100 | 是 |
-| AI_24 | Line Voltage Phase AB Dead Band Setting | % | x100 | 是 |
-| AI_25 | Line Voltage Phase BC Dead Band Setting | % | x100 | 是 |
-| AI_26 | Line Voltage Phase AC Dead Band Setting | % | x100 | 是 |
-| AI_27 | Active Power Dead Band Setting | % | x100 | 是 |
-| AI_28 | Reactive Power Dead Band Setting | % | x100 | 是 |
-| AI_29 | Power Factor Dead Band Setting | % | x100 | 是 |
-| AI_30 | Frequency Dead Band Setting | % | x100 | 是 |
-| AI_31 | Spare | - | x1 | 預設停用 |
-| AI_32 | Timestamp | Unix seconds | x1 | 由 `ts` 產生 |
+| AI_0 | Line Current Phase A | 0.1A | raw / 10 | 是 |
+| AI_1 | Line Current Phase B | 0.1A | raw / 10 | 是 |
+| AI_2 | Line Current Phase C | 0.1A | raw / 10 | 是 |
+| AI_3 | Line Current Phase N | 0.1A | raw / 10 | 是 |
+| AI_4 | Line Voltage Phase AB | 0.01V | raw / 100 | 是 |
+| AI_5 | Line Voltage Phase BC | 0.01V | raw / 100 | 是 |
+| AI_6 | Line Voltage Phase AC | 0.01V | raw / 100 | 是 |
+| AI_7 | Active Power | W | raw / 1 | 是 |
+| AI_8 | Reactive Power | Var | raw / 1 | 是 |
+| AI_9 | Power Factor | % | raw / 1 | 是 |
+| AI_10 | Frequency | 0.1Hz | raw / 10 | 是 |
+| AI_11 | Accumulated Energy | Wh | raw / 1 | 否，snapshot only |
+| AI_12 | Irradiance | W/m2 | raw / 1 | 否，snapshot only |
+| AI_13 | Wind Speed | m/s | raw / 1 | 否，snapshot only |
+| AI_14 | Inverter PF Setpoint | % | raw / 1 | 是 |
+| AI_15 | Inverter Active Power Setpoint | % | raw / 1 | 是 |
+| AI_16 | Inverter Reactive Power Setpoint | % | raw / 1 | 是 |
+| AI_17 | Inverter Vpset | integer | raw / 1 | 是 |
+| AI_18 | Inverter 1-25 Control Success Bitmask | 25-bit integer | raw / 1 | 由 `cmd_ack` 產生 |
+| AI_19 | Inverter 26-50 Control Success Bitmask | 25-bit integer | raw / 1 | 由 `cmd_ack` 產生 |
+| AI_20 | Line Current Phase A Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_21 | Line Current Phase B Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_22 | Line Current Phase C Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_23 | Line Current Phase N Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_24 | Line Voltage Phase AB Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_25 | Line Voltage Phase BC Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_26 | Line Voltage Phase AC Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_27 | Active Power Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_28 | Reactive Power Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_29 | Power Factor Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_30 | Frequency Dead Band Setting | 0.01% | raw / 100 | 是 |
+| AI_31 | Spare | - | raw / 1 | 預設停用 |
+| AI_32 | Timestamp | Unix seconds | raw / 1 | 由 `ts` 產生 |
 
 AI_18 / AI_19 bitmask 規則：
 

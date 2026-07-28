@@ -146,18 +146,22 @@ class LivePointMonitor:
             def append_site(site: SiteConfig, service_key: str) -> None:
                 state = self.states.get(service_key)
                 meta = self.meta.get(service_key, {})
-                values = state.snapshot_engineering() if state is not None else {}
+                raw_values = state.snapshot_raw() if state is not None else {}
+                engineering_values = state.snapshot_engineering() if state is not None else {}
                 points = []
                 for index, point in enabled_ai_points(self.config.dnp3.include_spare_point_31).items():
-                    value = values.get(index, point.default)
+                    raw_value = raw_values.get(index, point.to_dnp_value(point.default))
+                    engineering_value = engineering_values.get(index, point.default)
                     points.append(
                         {
                             "index": index,
                             "key": point.key,
                             "name": point.name,
                             "unit": point.unit,
-                            "value": value,
-                            "dnp_value": point.to_dnp_value(value),
+                            "value": raw_value,
+                            "raw_value": raw_value,
+                            "engineering_value": engineering_value,
+                            "dnp_value": int(round(float(raw_value))),
                             "updated_at": self.updated_at.get(service_key, {}).get(index),
                         }
                     )
@@ -1686,7 +1690,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>索引</th><th>名稱</th><th>值</th><th>單位</th><th>DNP Raw</th><th>更新時間</th></tr>
+                <tr><th>索引</th><th>名稱</th><th>MQTT/DNP Raw</th><th>工程值</th><th>單位</th><th>更新時間</th></tr>
               </thead>
               <tbody id="liveRows"></tbody>
             </table>
@@ -2454,9 +2458,9 @@ INDEX_HTML = r"""<!doctype html>
         <tr>
           <td class="mono">${escapeHtml(point.key)}</td>
           <td>${escapeHtml(point.name)}</td>
-          <td class="mono">${escapeHtml(formatValue(point.value))}</td>
+          <td class="mono">${escapeHtml(formatValue(point.raw_value ?? point.value))}</td>
+          <td class="mono">${escapeHtml(formatValue(point.engineering_value ?? point.raw_value ?? point.value))}</td>
           <td>${escapeHtml(point.unit)}</td>
-          <td class="mono">${escapeHtml(point.dnp_value)}</td>
           <td>${escapeHtml(formatTs(point.updated_at))}</td>
         </tr>
       `).join('');

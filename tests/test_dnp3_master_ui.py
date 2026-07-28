@@ -190,6 +190,39 @@ class Dnp3MasterUiTests(unittest.TestCase):
         self.assertEqual(result["results"], 1)
         self.assertFalse(result["success"])
 
+    def test_command_result_parser_marks_task_failure_summary_failed(self):
+        result = _parse_command_result("[task] scan AI range 0-32 completed: FAILURE_NO_COMMS\n")
+
+        self.assertEqual(result["summary"], "FAILURE_NO_COMMS")
+        self.assertFalse(result["success"])
+
+    def test_multi_poll_marks_failure_summary_as_failed_even_with_zero_exit(self):
+        defaults = {"host": "127.0.0.1", "port": 20000, "master_address": 100, "outstation_address": 1}
+
+        def fake_run(_simulator_path, args, timeout=30):
+            address = int(args[args.index("--outstation-address") + 1])
+            return {
+                "returncode": 0,
+                "stdout": "[command] summary=FAILURE_NO_COMMS results=1\n",
+                "stderr": "",
+                "duration_seconds": 0.01,
+                "transmission": [{"outstation_address": address}],
+                "command_result": {"summary": "FAILURE_NO_COMMS", "results": 1, "success": False},
+            }
+
+        with patch("tools.dnp3_master_ui._run_simulator_unlocked", side_effect=fake_run):
+            result = _run_multi_poll(
+                Path("simulator.py"),
+                {"host": "127.0.0.1", "port": 20000, "master_address": 100},
+                defaults,
+                [1],
+                {1: "logger_a"},
+                ["scan", "--classes", "class0", "--wait", "3"],
+            )
+
+        self.assertEqual(result["returncode"], 1)
+        self.assertFalse(result["results"][0]["success"])
+
     def test_command_result_parser_marks_success_summary_ok(self):
         result = _parse_command_result("[command] summary=SUCCESS results=1\n")
 
@@ -283,11 +316,14 @@ class Dnp3MasterUiTests(unittest.TestCase):
         self.assertIn("machineStatusFilter", INDEX_HTML)
         self.assertIn("machineStatusCounts", INDEX_HTML)
         self.assertIn("updateMachineStatusCounts", INDEX_HTML)
+        self.assertIn('<option value="online">在線</option>', INDEX_HTML)
         self.assertIn('<option value="down">離線</option>', INDEX_HTML)
         self.assertIn('<option value="unknown">未知</option>', INDEX_HTML)
-        self.assertIn("狀態 監控中", INDEX_HTML)
+        self.assertIn("狀態 在線", INDEX_HTML)
         self.assertIn("離線", INDEX_HTML)
         self.assertIn("未知", INDEX_HTML)
+        self.assertIn("machinePollResults", INDEX_HTML)
+        self.assertIn("rememberMachinePollResults", INDEX_HTML)
         self.assertNotIn('<option value="selected">已選</option>', INDEX_HTML)
         self.assertNotIn('<option value="idle">未監控</option>', INDEX_HTML)
         self.assertIn("MACHINE_ROW_LIMIT", INDEX_HTML)

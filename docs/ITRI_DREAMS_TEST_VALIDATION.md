@@ -41,7 +41,7 @@ PYTHONPATH=src \
 | --- | --- | --- | --- |
 | 1-1 連線 | Master UI 對 Outstation 執行 `Start Monitor` 或 `Read AI`。 | Monitor Console 出現 link open，或 `Read AI` 成功回資料。 | 固定 IP、TCP `20000`、Master Address `100` 需正確。 |
 | 1-2 兩案場 | 在 `Registered DNP3 IDs` 看到 ID `1` 與 ID `2`，兩者皆勾選後啟動 Monitor。 | `Monitoring: 1, 2`，兩案場皆可 Poll / Monitor。 | ID `1` 是現場設備；ID `2` 是自備真實案場。 |
-| 2-1 Poll 數值 | `Master Poll` 按 `Read AI`。 | `Polled AI` 顯示兩個 DNP3 ID 的啟用 AI 點：AI_0..AI_30 與 AI_32；AI_0..AI_11 與現場電表一致。 | AI_31 是 Spare，預設停用。PV Logger payload 使用工程值，Outstation 會轉 DNP raw。 |
+| 2-1 Poll 數值 | `Master Poll` 按 `Read AI`。 | `Polled AI` 顯示兩個 DNP3 ID 的啟用 AI 點：AI_0..AI_30 與 AI_32；AI_0..AI_11 與現場電表一致。 | AI_31 是 Spare，預設停用。PV Logger payload 使用 DNP raw；UI 會依 scale 顯示工程值。 |
 | 2-2 Dead Band 預設值 | `Read AI` 檢查 AI_20..AI_30。 | AI_20..AI_26、AI_30 為 `0.5%`；AI_27..AI_29 為 `1.0%`。 | DNP raw 會是 `50` 或 `100`，UI value 會換算回百分比。 |
 | 2-3 Dead Band event | 先 `Start Monitor`，再降低變流器輸出電流。 | 3 秒內 `Received Events` 出現 source=`event`，受影響點通常為 AI_0..AI_3 或 AI_7，且 `DNP Time` 有時間戳。 | PV Logger 必須每秒檢查 deadband，並在觸發後送 `event` topic。工研院若嚴格要求 Class 2，需確認 `pydnp3` event class 設定與實測結果。 |
 | 2-4 15 分完整資料 | Monitor 持續開啟，等待 00、15、30、45 分。 | 收到 source=`snapshot`、DNP3 Type=`periodic` 的啟用 AI 完整資料，Flags 顯示 `129` 或其他 bit 7 已設值。 | PV Logger 必須準時送 `reason=periodic` 的完整 snapshot；AI_31 預設不送。 |
@@ -56,7 +56,7 @@ PYTHONPATH=src \
 | 4-1 DREAMS 離線 31 分後恢復 | 保持 Outstation 與 PV Logger 運行，只中斷 Master/DREAMS 連線 31 分鐘後恢復。 | 恢復連線後兩案場在線，至少收到 2 筆離線期間的 periodic snapshot/event。 | 不要停 Outstation service；DNP3 event buffer 才能累積離線期間資料。 |
 | 5-1 雲端系統離線 | 停止 Outstation service 或阻斷固定 IP DNP3 TCP。 | Master/DREAMS 看到所有案場離線或連線失敗。 | 這是雲端系統整體離線，不是單一 logger 離線。 |
 | 5-2 雲端系統重啟 | 重啟 Outstation service，PV Logger 在 MQTT 重連後送 `status=online` 與完整 `snapshot`。 | Master/DREAMS 可 Poll 到兩案場最近一筆完整資料。 | `status=online` 只代表在線；必須再送 startup snapshot，Outstation 才會有完整最新點值。 |
-| 6-1 現場資料蒐集器斷電 | 關閉 ID `1` 的 PV Logger/資料蒐集器，讓 broker LWT 或系統送 `status=offline`。 | Master/DREAMS 對 ID `1` poll / keep alive 無回應並看到 ID `1` 離線；ID `2` 不受影響；TCP 端點檢查仍可顯示 Outstation service 活著。 | `status=offline` 會停用該 logger 對應的 DNP3 ID，不是直接把 MQTT status 顯示給 Master。正式 6-1 至少需綁定 ID `1` 與 ID `2`，才能證明單一現場離線不影響其他案場。 |
+| 6-1 現場資料蒐集器斷電 | 關閉 ID `1` 的 PV Logger/資料蒐集器，讓 broker LWT 或系統送 `status=offline`。 | Master/DREAMS 對 ID `1` poll / keep alive 無回應並看到 ID `1` 離線；ID `2` 不受影響；TCP 端點檢查仍可顯示 Outstation service 活著。 | `status=offline` 會停用該 logger 對應的 DNP3 ID，不是直接把 MQTT status 顯示給 Master；離線後若還收到 snapshot/event 只更新暫存資料，不會恢復 DNP3 ID。TCP listener 由內部 endpoint keepalive 維持，不代表任何 logger 在線。正式 6-1 至少需綁定 ID `1` 與 ID `2`，才能證明單一現場離線不影響其他案場。 |
 | 6-2 現場資料蒐集器復歸 | ID `1` 復電後送 `status=online` 與完整 `snapshot`。 | Master/DREAMS 收到 ID `1` 最近一筆定時資料，Poll / Monitor 恢復。 | `snapshot` 必須是完整資料。 |
 | 7-1 固定 IP Nessus | 對受測固定 IP 做 Basic Network Scan。 | 報告無 Medium 以上弱點。 | 與程式功能無關，但會卡驗證。 |
 | 7-2 Web Portal Nessus | 對受測 Web Portal 做 Web Application Test。 | 報告無 Medium 以上弱點。 | Outstation UI 若對外開放，需改強密碼、限制來源 IP、避免預設帳密。 |

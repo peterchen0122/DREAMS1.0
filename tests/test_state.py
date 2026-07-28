@@ -10,11 +10,13 @@ class SiteStateTests(unittest.TestCase):
             {
                 "ts": 1715000900,
                 "reason": "periodic",
-                "data": {"AI_4": 380.1, "AI_7": 52000},
+                "data": {"AI_4": 38010, "AI_7": 52000},
             }
         )
-        self.assertEqual(changed[4], 380.1)
+        self.assertEqual(changed[4], 38010)
+        self.assertEqual(state.snapshot_raw()[4], 38010)
         self.assertEqual(state.snapshot_engineering()[32], 1715000900)
+        self.assertEqual(state.snapshot_engineering()[4], 380.1)
         self.assertEqual(state.snapshot_dnp()[4], 38010)
         self.assertEqual(state.snapshot_dnp()[7], 52000)
 
@@ -27,12 +29,20 @@ class SiteStateTests(unittest.TestCase):
         self.assertEqual(values[18], 1)
         self.assertEqual(values[19], 1)
 
+    def test_deadband_defaults_are_stored_as_raw_values(self):
+        state = SiteState("1")
+
+        self.assertEqual(state.snapshot_raw()[20], 50)
+        self.assertEqual(state.snapshot_dnp()[20], 50)
+        self.assertEqual(state.snapshot_engineering()[20], 0.5)
+
     def test_class2_skips_non_deadband_points(self):
         state = SiteState("1")
-        changed = state.apply_event({"ts": 1, "reason": "deadband", "data": {"AI_11": 10, "AI_7": 20}})
+        changed = state.apply_event({"ts": 1, "reason": "deadband", "data": {"AI_11": 10, "AI_4": 38010}})
         dnp_values = state.dnp_values_for_changed(changed)
         self.assertNotIn(11, dnp_values)
-        self.assertEqual(dnp_values[7], 20)
+        self.assertEqual(dnp_values[4], 38010)
+        self.assertEqual(state.snapshot_engineering()[4], 380.1)
 
     def test_status_updates_online_state_without_ai_mapping(self):
         state = SiteState("1", include_spare_point_31=True)
@@ -44,6 +54,23 @@ class SiteStateTests(unittest.TestCase):
         self.assertTrue(online)
         self.assertEqual(state.snapshot_engineering()[31], 0.0)
         self.assertEqual(state.snapshot_engineering()[32], 1715000910)
+
+    def test_offline_status_is_not_cleared_by_snapshot_or_event(self):
+        state = SiteState("1")
+        state.apply_status({"ts": 1715000900, "status": "offline"})
+
+        state.apply_snapshot({"ts": 1715000910, "data": {"AI_4": 38010}})
+        state.apply_event({"ts": 1715000920, "data": {"AI_7": 52000}})
+
+        self.assertFalse(state.online)
+        self.assertFalse(state.status_online)
+        self.assertEqual(state.snapshot_raw()[4], 38010)
+        self.assertEqual(state.snapshot_raw()[7], 52000)
+
+        state.apply_status({"ts": 1715000930, "status": "online"})
+
+        self.assertTrue(state.online)
+        self.assertTrue(state.status_online)
 
     def test_unknown_status_payload_does_not_change_online_state(self):
         state = SiteState("1", include_spare_point_31=True)

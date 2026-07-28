@@ -13,12 +13,13 @@ class SiteState:
         self.include_spare_point_31 = include_spare_point_31
         self._lock = threading.RLock()
         self._values: dict[int, float] = {
-            index: point.default
+            index: _point_default_raw(point)
             for index, point in enabled_ai_points(include_spare_point_31).items()
         }
         self._values[32] = int(time.time())
         self.last_snapshot_ts: int | None = None
         self.last_event_ts: int | None = None
+        self.status_online: bool | None = None
         self.online = False
 
     def apply_snapshot(self, payload: dict[str, Any]) -> dict[int, float]:
@@ -31,7 +32,8 @@ class SiteState:
             changed = self._apply_data(data)
             self._values[32] = ts
             self.last_snapshot_ts = ts
-            self.online = True
+            if self.status_online is not False:
+                self.online = True
             return changed
 
     def apply_event(self, payload: dict[str, Any]) -> dict[int, float]:
@@ -44,7 +46,8 @@ class SiteState:
             changed = self._apply_data(data)
             self._values[32] = ts
             self.last_event_ts = ts
-            self.online = True
+            if self.status_online is not False:
+                self.online = True
             return changed
 
     def apply_status(self, payload: dict[str, Any]) -> bool | None:
@@ -57,8 +60,10 @@ class SiteState:
         ts = int(payload.get("ts") or time.time())
         with self._lock:
             if status in {"online", "up", "connected", "1", "true"}:
+                self.status_online = True
                 self.online = True
             elif status in {"offline", "down", "disconnected", "0", "false"}:
+                self.status_online = False
                 self.online = False
             else:
                 return None
@@ -88,15 +93,22 @@ class SiteState:
                 self._values[19] = int(self._values.get(19, 0)) | (1 << (inverter_index - 26))
             self._values[32] = int(time.time())
 
-    def snapshot_engineering(self) -> dict[int, float]:
+    def snapshot_raw(self) -> dict[int, float]:
         with self._lock:
             return dict(self._values)
+
+    def snapshot_engineering(self) -> dict[int, float]:
+        with self._lock:
+            return {
+                index: _engineering_value(index, raw_value)
+                for index, raw_value in self._values.items()
+            }
 
     def snapshot_dnp(self) -> dict[int, int]:
         with self._lock:
             values: dict[int, int] = {}
             for index, point in enabled_ai_points(self.include_spare_point_31).items():
-                values[index] = point.to_dnp_value(self._values.get(index, point.default))
+                values[index] = _dnp_raw_value(self._values.get(index, _point_default_raw(point)))
             return values
 
     def dnp_values_for_changed(self, changed: dict[int, float]) -> dict[int, int]:
@@ -105,7 +117,7 @@ class SiteState:
             point = AI_POINTS.get(index)
             if point is None or not point.enabled or not point.class2_enabled:
                 continue
-            values[index] = point.to_dnp_value(value)
+            values[index] = _dnp_raw_value(value)
         return values
 
     def _apply_data(self, data: dict[str, Any]) -> dict[int, float]:
@@ -121,3 +133,18 @@ class SiteState:
             self._values[index] = value
             changed[index] = value
         return changed
+
+
+def _point_default_raw(point) -> float:
+    return float(point.to_dnp_value(point.default))
+
+
+def _engineering_value(index: int, raw_value: float | int) -> float:
+    point = AI_POINTS.get(index)
+    if point is None or point.scale == 0:
+        return float(raw_value)
+    return float(raw_value) / point.scale
+
+
+def _dnp_raw_value(value: float | int) -> int:
+    return int(round(float(value)))
